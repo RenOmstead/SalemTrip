@@ -4,6 +4,7 @@ import {
 } from './planner.js';
 import { TZ, zonedNow, zonedToDate, tzOffsetMin, sunTimes, buildICS, daysBetween, fmtDate } from './time.js';
 import { hoursOn } from './hours.js';
+import { icon } from './icons.js';
 import { TRIP_FACTS, REMINDERS, applyTripFacts, arriveAt, leaveAt, travelMins } from './trip.js';
 
 /* global L */
@@ -153,6 +154,9 @@ function update(fn, opts = {}) {
 // -------------------------------------------------------------- helpers ----
 
 const $ = (sel, el = document) => el.querySelector(sel);
+// Times in the timeline: the hour big, AM/PM small, never split across lines.
+const tlTime = m => fmtTime(m).replace(/ (AM|PM)$/, '<span class="ap">$1</span>');
+const nbTime = m => fmtTime(m).replace(' ', '\u00A0');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = (p = '') => p + Math.random().toString(36).slice(2, 9);
 const placeMap = new Map(PLACES.map(p => [p.id, p]));
@@ -368,12 +372,12 @@ function travelCardHtml() {
   if (!travel) return '';
   const f = TRIP_FACTS, drive = `about ${fmtDuration(f.driveMins)} of driving (${f.driveMiles} miles) plus a ${f.stopMins}-minute stop`;
   if (travel === 'arrive') {
-    return `<div class="card next"><div class="eyebrow">\uD83D\uDE97 Travel day \u00B7 fixed</div>
+    return `<div class="card next"><div class="eyebrow">${icon('car', 14)} Travel day \u00B7 fixed</div>
       <div>Leave ${esc(f.home)} at <b>${fmtTime(toMin(f.arrive.leaveHome))}</b>. Get to ${esc(f.lodging.name)} around <b>${fmtTime(arriveAt())}</b>.</div>
       <div class="small muted">${drive}. The house is open from ${fmtTime(toMin(f.lodging.checkIn))}. Friday afternoon traffic on Route 128 can add time.</div>
       <div class="btns"><a class="btn small" href="${esc(homeDirUrl(false))}" target="_blank" rel="noopener">Driving directions</a></div></div>`;
   }
-  return `<div class="card next"><div class="eyebrow">\uD83D\uDE97 Heading home \u00B7 fixed</div>
+  return `<div class="card next"><div class="eyebrow">${icon('car', 14)} Heading home \u00B7 fixed</div>
     <div>Leave ${esc(f.lodging.name)} by <b>${fmtTime(leaveAt())}</b> to be home in ${esc(f.home)} by <b>${fmtTime(toMin(f.depart.homeBy))}</b>.</div>
     <div class="small muted">${drive}. Anything you add this morning is planned to finish back at the house in time to leave.</div>
     <div class="btns"><a class="btn small" href="${esc(homeDirUrl(true))}" target="_blank" rel="noopener">Driving directions home</a></div></div>`;
@@ -383,13 +387,21 @@ function remindersHtml(date = state.day) {
   const list = REMINDERS.filter(r => r.date === date);
   if (!list.length) return '';
   const now = nowInfo();
-  return `<div class="card"><div class="eyebrow">\uD83D\uDD14 Reminders</div><ul class="list">${list.map(r => {
-    const past = now.dateStr > r.date || (now.dateStr === r.date && now.minutes > toMin(r.time) + 90);
-    return `<li style="flex-wrap:wrap;${past ? 'opacity:.55' : ''}"><div class="ico"><b>${fmtTime(toMin(r.time)).replace(/ (AM|PM)/, '')}</b></div>
-      <div class="grow"><div class="li-title" style="white-space:normal">${esc(r.title)}</div><div class="small muted">${fmtTime(toMin(r.time))} \u00B7 ${esc(r.body)}</div>
-      <div class="btns" style="margin-top:4px">${r.links.map(l => `<a class="btn small" href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div></div></li>`;
+  const isPast = r => now.dateStr > r.date || (now.dateStr === r.date && now.minutes > toMin(r.time) + 90);
+  // The same check at several times of day is one row with all its times.
+  const groups = [];
+  for (const r of list) {
+    const g = groups.find(x => x.title === r.title);
+    if (g) g.times.push(r); else groups.push({ ...r, times: [r] });
+  }
+  return `<div class="card"><div class="eyebrow">${icon('bell', 14)} Reminders</div><ul class="list reminders">${groups.map(g => {
+    const past = g.times.every(isPast);
+    const times = g.times.map(r => `<span class="when${isPast(r) ? ' past' : ''}">${fmtTime(toMin(r.time))}</span>`).join('');
+    return `<li${past ? ' class="past"' : ''}><div class="ico">${icon(g.id === 'witch-book' ? 'ticket' : 'bell', 16)}</div>
+      <div class="grow"><div class="li-title">${esc(g.title)}</div><div class="whens">${times}</div><div class="small muted">${esc(g.body)}</div>
+      <div class="btns">${g.links.map(l => `<a class="btn small" href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div></div></li>`;
   }).join('')}</ul>
-  <p class="small muted" style="margin:6px 0 0">These pop up while the app is open. For alarms you can count on, use \uD83D\uDCC5 Add trip to calendar.</p></div>`;
+  <p class="small muted" style="margin:6px 0 0">These pop up while the app is open. For alarms you can count on, use Add trip to calendar.</p></div>`;
 }
 
 // Plans for every day of the trip (for the calendar export).
@@ -496,7 +508,7 @@ function pinIcon(p, it, opts = {}) {
   const color = CATEGORIES[p.cat]?.color || '#666';
   const done = it && state.done.includes(it.key);
   const cls = ['pin', it ? '' : 'small', done ? 'done' : '', opts.next ? 'next' : '', it?.type === 'appt' ? 'appt' : ''].join(' ');
-  const label = it ? (done ? '✓' : it.n) : (CATEGORIES[p.cat]?.icon || '•');
+  const label = it ? (done ? icon('check', 14) : it.n) : icon(CATEGORIES[p.cat]?.icon || 'map-pin', 12);
   const size = it ? 30 : 22;
   return L.divIcon({
     className: it || opts.keep ? 'pin-wrap' : 'pin-wrap pin-minor',
@@ -524,7 +536,7 @@ function renderMap() {
   for (const a of state.appts) {
     if (a.placeId || a.lat == null) continue;
     const it = plan.order.get(a.id);
-    const m = L.marker([a.lat, a.lng], { icon: pinIcon({ cat: 'custom' }, it || { n: '⏰', type: 'appt', key: a.id }), zIndexOffset: 700 })
+    const m = L.marker([a.lat, a.lng], { icon: pinIcon({ cat: 'custom' }, it || { n: icon('clock', 14), type: 'appt', key: a.id }), zIndexOffset: 700 })
       .bindPopup(() => apptPopupHtml(a.id), { maxWidth: 290 });
     m.addTo(placesLayer);
     markerById.set(a.id, m);
@@ -538,9 +550,9 @@ function renderMap() {
   if (homeMarker) { homeMarker.remove(); homeMarker = null; }
   if (state.lodging) {
     homeMarker = L.marker([state.lodging.lat, state.lodging.lng], {
-      icon: L.divIcon({ className: 'pin-wrap', html: '<div class="car-pin home-pin">\uD83C\uDFE0</div>', iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
+      icon: L.divIcon({ className: 'pin-wrap', html: `<div class="car-pin home-pin">${icon('house', 18)}</div>`, iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
       zIndexOffset: 850, title: state.lodging.name,
-    }).bindPopup(() => `<h4>\uD83C\uDFE0 ${esc(state.lodging.name || 'Where we\u2019re staying')}</h4>
+    }).bindPopup(() => `<h4>${esc(state.lodging.name || 'Where we\u2019re staying')}</h4>
       ${state.lodging.addr ? `<div class="small muted">${esc(state.lodging.addr)}</div>` : ''}
       <div class="btns">${dirLink('home', 'Directions', 'btn small primary', fix && walkMinutes(fix, state.lodging, pace()) > 20 ? 'drive' : 'walk')}
       <button class="btn small" data-act="lodging">Change</button></div>`).addTo(map);
@@ -550,7 +562,7 @@ function renderMap() {
     const ll = [state.parking.lat, state.parking.lng];
     if (!carMarker) {
       carMarker = L.marker(ll, {
-        icon: L.divIcon({ className: 'pin-wrap', html: '<div class="car-pin">🚗</div>', iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
+        icon: L.divIcon({ className: 'pin-wrap', html: `<div class="car-pin">${icon('car', 18)}</div>`, iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
         zIndexOffset: 900, draggable: true,
       }).bindPopup(carPopupHtml).addTo(map);
       carMarker.on('dragend', e => {
@@ -603,20 +615,20 @@ function popupHtml(id) {
   const dist = fix ? `<div class="small muted">${fmtDistance(walkMeters(fix, p))} from you · ~${walkMinutes(fix, p, pace())} min walk</div>` : '';
   return `
     <h4>${esc(p.name)}</h4>
-    <div class="small muted">${cat.icon} ${esc(p.sub || cat.label)}${p.addr ? ` · ${esc(p.addr.replace(/, (Salem|Rockport|Gloucester), MA$/, ''))}` : ''}</div>
+    <div class="small muted pop-cat">${icon(cat.icon, 13)} ${esc(p.sub || cat.label)}${p.addr ? ` · ${esc(p.addr.replace(/, (Salem|Rockport|Gloucester), MA$/, ''))}` : ''}</div>
     ${p.cat !== 'parking' && p.cat !== 'transit' ? `<div class="small">${esc(hoursText(p))}${p.mins ? ` · about ${fmtDuration(p.mins)} here` : ''}</div>` : ''}
     ${p.osm && p.oh ? `<div class="small muted">Listed hours: ${esc(p.oh)}</div>` : ''}
     ${sched}${dist}
     ${p.tip ? `<div class="small" style="margin-top:6px">${esc(p.tip)}</div>` : ''}
     ${p.web || p.phone ? `<div class="small" style="margin-top:4px">${p.web ? `<a href="${esc(/^https?:/.test(p.web) ? p.web : 'https://' + p.web)}" target="_blank" rel="noopener">Website</a>` : ''}${p.web && p.phone ? ' · ' : ''}${p.phone ? `<a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a>` : ''}</div>` : ''}
     <div class="btns">
-      ${p.cat === 'parking' ? `<button class="btn small primary" data-act="park-at" data-id="${id}">🚗 We parked here</button>`
+      ${p.cat === 'parking' ? `<button class="btn small primary" data-act="park-at" data-id="${id}">${icon('car', 14)} We parked here</button>`
         : stop ? `<button class="btn small" data-act="toggle-stop" data-id="${id}">Remove from plan</button>
-                  <button class="btn small ${stop.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${id}">★ Must-see</button>`
+                  <button class="btn small ${stop.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${id}">${icon('star', 14)} Must-see</button>`
         : `<button class="btn small primary" data-act="toggle-stop" data-id="${id}">+ Add to plan</button>`}
       ${dirLink(id)}
       <button class="btn small" data-act="route-to" data-id="${id}">Show route</button>
-      ${p.cat !== 'parking' ? `<button class="btn small" data-act="appt-at" data-id="${id}">⏰ Set a time</button>` : ''}
+      ${p.cat !== 'parking' ? `<button class="btn small" data-act="appt-at" data-id="${id}">${icon('clock', 14)} Set a time</button>` : ''}
       ${p.cat === 'custom' && !p.osm ? `<button class="btn small danger" data-act="del-custom" data-id="${id}">Delete</button>` : ''}
     </div>`;
 }
@@ -624,7 +636,7 @@ function popupHtml(id) {
 function apptPopupHtml(id) {
   const a = state.appts.find(x => x.id === id);
   if (!a) return '';
-  return `<h4>⏰ ${esc(a.title)}</h4><div class="small">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)}</div>
+  return `<h4>${esc(a.title)}</h4><div class="small">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)}</div>
     ${a.note ? `<div class="small">${esc(a.note)}</div>` : ''}
     <div class="btns">${dirLink(id)}<button class="btn small" data-act="route-to" data-id="${id}">Show route</button>
     <button class="btn small" data-act="tab" data-tab="times">Edit</button></div>`;
@@ -633,7 +645,7 @@ function apptPopupHtml(id) {
 function carPopupHtml() {
   const p = state.parking;
   if (!p) return '';
-  return `<h4>🚗 Our car</h4>
+  return `<h4>Our car</h4>
     <div class="small">Parked at ${new Date(p.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ })}${p.note ? ` · ${esc(p.note)}` : ''}</div>
     ${p.meterUntil != null ? `<div class="small"><b>Parking runs out at ${fmtTime(p.meterUntil)}</b></div>` : ''}
     <div class="small muted">Drag the pin if it's in the wrong spot.</div>
@@ -655,9 +667,9 @@ map.on('contextmenu', e => {
   L.popup({ maxWidth: 260 }).setLatLng(e.latlng).setContent(`
     <h4>This spot</h4><div class="small muted">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
     <div class="btns">
-      <button class="btn small primary" data-act="custom-here" data-lat="${lat}" data-lng="${lng}">📍 Add a place here</button>
-      <button class="btn small" data-act="park-pin" data-lat="${lat}" data-lng="${lng}">🚗 We parked here</button>
-      <button class="btn small" data-act="lodging-pin" data-lat="${lat}" data-lng="${lng}">🏠 We're staying here</button>
+      <button class="btn small primary" data-act="custom-here" data-lat="${lat}" data-lng="${lng}">${icon('map-pin', 14)} Add a place here</button>
+      <button class="btn small" data-act="park-pin" data-lat="${lat}" data-lng="${lng}">${icon('car', 14)} We parked here</button>
+      <button class="btn small" data-act="lodging-pin" data-lat="${lat}" data-lng="${lng}">${icon('house', 14)} We're staying here</button>
     </div>`).openOn(map);
 });
 
@@ -797,7 +809,7 @@ function renderRouteBar() {
   const mins = Math.max(1, Math.round(left / pace()));
   bar.innerHTML = `
     <div class="routebar-body">
-      <b>🚶 ${mins} min · ${fmtDistance(left)} to ${esc(r.target.name)}</b>
+      <b>${mins} min walk · ${fmtDistance(left)} to ${esc(r.target.name)}</b>
       <span class="small">${r.loading ? 'Finding a walking route…' : r.offline ? 'Straight line shown. No route service, maybe no signal.' : fix ? 'Follow the blue line.' : 'Turn on location to follow along.'}</span>
       ${r.steps ? `<ul class="steps" id="route-steps" hidden>${r.steps.map(s => `<li><span>${esc(s.text)}</span><span>${s.dist ? fmtDistance(s.dist) : ''}</span></li>`).join('')}</ul>` : ''}
       <div class="routebar-actions">
@@ -805,7 +817,7 @@ function renderRouteBar() {
         ${r.steps ? '<button data-act="toggle-steps">Turn list</button>' : ''}
       </div>
     </div>
-    <button data-act="close-route" aria-label="Close route">✕</button>`;
+    <button data-act="close-route" aria-label="Close route">${icon('x', 16)}</button>`;
   bar.hidden = false;
 }
 
@@ -819,7 +831,7 @@ function updateRouteProgress() {
     return;
   }
   const b = $('#routebar b');
-  if (b) b.textContent = `🚶 ${Math.max(1, Math.round(left / pace()))} min · ${fmtDistance(left)} to ${ui.route.target.name}`;
+  if (b) b.textContent = `${Math.max(1, Math.round(left / pace()))} min walk · ${fmtDistance(left)} to ${ui.route.target.name}`;
 }
 
 // --------------------------------------------------------------- sheet ----
@@ -828,6 +840,7 @@ const SHEET = { peek: () => 132, half: () => Math.round(innerHeight * .5), full:
 function sheetPx() { return innerWidth >= 900 ? 0 : SHEET[ui.sheet](); }
 function setSheet(name) {
   ui.sheet = name;
+  document.documentElement.classList.toggle('sheet-full', name === 'full');
   document.documentElement.style.setProperty('--sheet-h', `${SHEET[name]()}px`);
 }
 (function sheetDrag() {
@@ -843,6 +856,7 @@ function setSheet(name) {
     const h = Math.max(100, Math.min(innerHeight * .94, h0 + (y0 - e.clientY)));
     if (Math.abs(y0 - e.clientY) > 4) moved = true;
     document.documentElement.style.setProperty('--sheet-h', `${h}px`);
+    document.documentElement.classList.toggle('sheet-full', h > innerHeight * .75);
   });
   const end = e => {
     if (y0 == null) return;
@@ -860,7 +874,7 @@ function setSheet(name) {
 
 // --------------------------------------------------------------- panes ----
 
-const TOWN_ICON = { rockport: '⚓', salem: '🧙', gloucester: '🐋' };
+const TOWN_ICON = { rockport: 'anchor', salem: 'moon', gloucester: 'ship' };
 
 function renderChips() {
   const { sunset } = sun();
@@ -869,7 +883,7 @@ function renderChips() {
   const where = town().name;
   const when = isTripDay() ? `Now ${fmtTime(n.minutes)} · ${where}`
     : `${dayLabel(state.day)} · ${where}${days > 0 ? ` · in ${days} day${days === 1 ? '' : 's'}` : ''}`;
-  $('#chips').innerHTML = `<span class="chip">${esc(when)}</span><span class="chip">🌘 Dark at ${fmtTime(sunset)}</span>`;
+  $('#chips').innerHTML = `<span class="chip glass">${esc(when)}</span><span class="chip glass">${icon('sunset', 14)} ${fmtTime(sunset)}</span>`;
 }
 
 function renderDayStrip() {
@@ -882,7 +896,7 @@ function renderDayStrip() {
     const count = day.stops.length + day.appts.length;
     return `<button class="daychip" data-act="pick-day" data-day="${d}" aria-pressed="${d === state.day}">
       <span class="dc-date">${esc(dayLabel(d))}${d === today ? ' •' : ''}</span>
-      <span class="dc-town">${TOWN_ICON[day.town] || ''} ${esc(t.name)}${travelDay(d) === 'arrive' ? ' · arrive' : travelDay(d) === 'depart' ? ' · home' : ''}${count ? ` · ${count}` : ''}</span>
+      <span class="dc-town">${icon(TOWN_ICON[day.town] || 'map-pin', 12)} ${esc(t.name)}${travelDay(d) === 'arrive' ? ' · arrive' : travelDay(d) === 'depart' ? ' · home' : ''}${count ? ` · ${count}` : ''}</span>
     </button>`;
   }).join('');
   el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -901,22 +915,22 @@ function tl(item, opts = {}) {
   const sub = [];
   const appt = item.type === 'appt' ? state.appts.find(a => a.id === item.key) : null;
   if (item.type === 'appt') sub.push(apptPill(appt));
-  else if (item.priority === 'must' && !item.anywhere) sub.push('<span class="pill must">★ Must-see</span>');
+  else if (item.priority === 'must' && !item.anywhere) sub.push(`<span class="pill must">${icon('star', 11)} Must-see</span>`);
   if (done) sub.push('<span class="pill done">Done</span>');
   sub.push(`<span>${fmtDuration(item.depart - item.begin)}</span>`);
-  if (p?.tickets) sub.push('<span>🎟️ book ahead</span>');
+  if (p?.tickets) sub.push(`<span>${icon('ticket', 12)} book ahead</span>`);
   if (p?.hoursUnknown) sub.push('<span>hours not listed</span>');
   return `
     <li class="tl-item ${done ? 'is-done' : ''}">
-      <div class="tl-time">${fmtTime(item.begin)}<small>to ${fmtTime(item.depart)}</small></div>
-      <div class="tl-dot ${item.type === 'appt' ? 'appt' : ''} ${done ? 'done' : ''}" style="--c:${color}">${done ? '✓' : item.anywhere ? '☕' : item.n}</div>
+      <div class="tl-time">${tlTime(item.begin)}<small>to ${nbTime(item.depart)}</small></div>
+      <div class="tl-dot ${item.type === 'appt' ? 'appt' : ''} ${done ? 'done' : ''}" style="--c:${color}">${done ? icon('check', 14) : item.anywhere ? icon('coffee', 14) : item.n}</div>
       <div class="tl-body">
         <button class="tl-name" data-act="focus" data-id="${esc(item.key)}">${esc(item.name)}</button>
         <div class="tl-meta row wrap">${sub.join(' ')}</div>
         ${appt?.note ? `<div class="small muted">${esc(appt.note)}</div>` : ''}
-        ${item.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}
+        ${item.warnings.map(w => `<div class="warnline">${icon('triangle-alert', 13)} ${esc(w)}</div>`).join('')}
         ${opts.actions !== false && isTripDay() && !done ? `<div class="btns" style="margin-top:6px">
-          <button class="btn small" data-act="done" data-id="${esc(item.key)}">✓ Done</button>
+          <button class="btn small" data-act="done" data-id="${esc(item.key)}">${icon('check', 14)} Done</button>
           ${item.type === 'stop' && !item.anywhere ? `<button class="btn small ghost" data-act="skip" data-id="${esc(item.key)}">Skip</button>` : ''}
         </div>` : ''}
       </div>
@@ -927,13 +941,13 @@ function backKey() { return plan.base.car ? 'car' : plan.base.home && state.lodg
 
 function leg(item) {
   if (item.anywhere) return '';
-  const free = item.wait >= 15 ? `<span class="tl-free">🦇 ${fmtDuration(item.wait)} to wander${item.type === 'appt' ? ' before this' : ''}</span>` : '';
-  const how = item.by === 'drive' ? `🚗 ${item.walk} min drive` : `🚶 ${item.walk} min`;
-  const walk = item.walk > 0 ? `${how} · ${fmtDistance(item.dist)}` : '🚶 Right here';
+  const free = item.wait >= 15 ? `<span class="tl-free">${fmtDuration(item.wait)} free${item.type === 'appt' ? ' before this' : ''}</span>` : '';
+  const how = item.by === 'drive' ? `${icon('car', 14)} ${item.walk} min drive` : `${icon('footprints', 14)} ${item.walk} min`;
+  const walk = item.walk > 0 ? `${how} · ${fmtDistance(item.dist)}` : `${icon('footprints', 14)} Right here`;
   const key = item.type === 'end' ? backKey() : item.key;
   return `
     <li class="tl-leg">
-      <div class="tl-time small muted">${item.type === 'appt' && item.walk > 0 ? `leave ${fmtTime(item.leaveBy)}` : ''}</div>
+      <div class="tl-time small muted">${item.type === 'appt' && item.walk > 0 ? `leave ${nbTime(item.leaveBy)}` : ''}</div>
       <div class="line"></div>
       <div class="walk">${walk} ${item.walk > 0 ? dirLink(key, 'Go', 'btn small', item.by) : ''} ${free}</div>
     </li>`;
@@ -941,10 +955,10 @@ function leg(item) {
 
 function daySettingsHtml() {
   const s = state.settings;
-  const startOpts = `<option value="lodging" ${s.startFrom === 'lodging' ? 'selected' : ''}>🏠 Where we're staying</option>
-    <option value="parking" ${s.startFrom === 'parking' ? 'selected' : ''}>🚗 Where we park</option>${placeOptions(s.startFrom)}`;
+  const startOpts = `<option value="lodging" ${s.startFrom === 'lodging' ? 'selected' : ''}>Where we're staying</option>
+    <option value="parking" ${s.startFrom === 'parking' ? 'selected' : ''}>Where we park</option>${placeOptions(s.startFrom)}`;
   return `<details class="edit daysettings" ${ui.openDay ? 'open' : ''}>
-    <summary>⚙️ ${esc(town().name)} · ${fmtTime(toMin(s.dayStart))}–${fmtTime(toMin(s.dayEnd))} · ${s.mode === 'mixed' ? 'walk + drive' : 'walking'} (change)</summary>
+    <summary>${icon('sliders-horizontal', 14)} ${esc(town().name)} · ${fmtTime(toMin(s.dayStart))}–${fmtTime(toMin(s.dayEnd))} · ${s.mode === 'mixed' ? 'walk + drive' : 'walking'} (change)</summary>
     <div class="grid2" style="margin-top:8px">
       <label class="field"><span>Where</span><select data-bind="settings.town">
         ${Object.entries(TOWNS).map(([k, t]) => `<option value="${k}" ${s.town === k ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
@@ -962,7 +976,7 @@ function daySettingsHtml() {
 }
 
 function lodgingPromptHtml() {
-  return `<div class="card warn"><div class="eyebrow">🏠 Where are you staying?</div>
+  return `<div class="card warn"><div class="eyebrow">${icon('house', 14)} Where are you staying?</div>
     <p class="small" style="margin:4px 0 0">Rockport days start and end there. Until then, the plan starts from Dock Square.</p>
     <div class="btns"><button class="btn primary" data-act="lodging">Find it</button>
     <button class="btn" data-act="lodging-pick">Pick on map</button>
@@ -979,7 +993,7 @@ function driveHintHtml() {
   const startAt = toMin(state.settings.dayStart);
   const fromName = state.lodging ? 'where you’re staying' : 'Rockport';
   const back = plan.items[plan.items.length - 1];
-  return `<div class="card"><div class="eyebrow">🚗 Getting here</div>
+  return `<div class="card"><div class="eyebrow">${icon('car', 14)} Getting here</div>
     <div>Leave ${fromName} by <b>${fmtTime(startAt - mins)}</b> to park by ${fmtTime(startAt)}.</div>
     <div class="small muted">About ${mins} min including parking. ${back.type === 'end' ? `Back ${state.lodging ? 'home' : 'in Rockport'} around ${fmtTime(back.arrive + mins)}.` : ''}</div>
     <div class="btns">${dirLink('base', 'Driving directions', 'btn small', 'drive')}</div></div>`;
@@ -1000,29 +1014,29 @@ function renderToday() {
     if (nxt) {
       const late = n.minutes > nxt.leaveBy + 10 && nxt.type === 'appt';
       html += `<div class="card next">
-        <div class="eyebrow">🕯️ ${nxt.begin <= n.minutes ? 'Now' : 'Up next'}</div>
+        <div class="eyebrow">${icon('navigation', 14)} ${nxt.begin <= n.minutes ? 'Now' : 'Up next'}</div>
         <div class="big">${esc(nxt.name)}</div>
         <div class="small">${fmtTime(nxt.begin)}–${fmtTime(nxt.depart)}${!nxt.anywhere && fix ? ` · ${walkMinutes(fix, nxt, pace())} min walk from you` : ''}</div>
         ${late ? '<div class="warnline">You may be running late.</div>' : ''}
         <div class="btns">
           ${nxt.anywhere ? '' : dirLink(nxt.key, 'Directions', 'btn primary', nxt.by)}
           ${nxt.anywhere ? '' : `<button class="btn" data-act="route-to" data-id="${esc(nxt.key)}">Show route</button>`}
-          <button class="btn" data-act="done" data-id="${esc(nxt.key)}">✓ Done</button>
+          <button class="btn" data-act="done" data-id="${esc(nxt.key)}">${icon('check', 14)} Done</button>
         </div></div>`;
     } else if (stopsCount) {
-      html += `<div class="card good"><div class="big">${s.town === 'salem' ? 'You survived Salem 🎃' : 'That’s the day 🎃'}</div><p class="small">That's everything on the list.</p>
+      html += `<div class="card good"><div class="big">That’s the day</div><p class="small">That's everything on the list.</p>
         <div class="btns">${dirLink(backKey(), plan.base.car ? 'Walk to car' : 'Directions back', 'btn primary', plan.items[plan.items.length - 1].by)}</div></div>`;
     }
     if (appt && (!nxt || appt.key !== nxt.key)) {
       const leaveIn = appt.leaveBy - n.minutes;
-      html += `<div class="card ${leaveIn < 15 ? 'warn' : ''}"><div class="eyebrow">⏰ Next fixed time</div>
+      html += `<div class="card ${leaveIn < 15 ? 'warn' : ''}"><div class="eyebrow">${icon('clock', 14)} Next fixed time</div>
         <div><b>${esc(appt.name)}</b> at ${fmtTime(appt.begin)}</div>
         <div class="small">Leave by ${fmtTime(appt.leaveBy)} (${leaveIn > 0 ? `in ${fmtDuration(leaveIn)}` : 'now'})</div></div>`;
     }
     if (state.parking?.meterUntil != null) {
       const left = state.parking.meterUntil - n.minutes;
       if (left > -60) {
-        html += `<div class="card ${left < 30 ? 'warn' : ''}"><div class="eyebrow">🚗 Parking</div>
+        html += `<div class="card ${left < 30 ? 'warn' : ''}"><div class="eyebrow">${icon('car', 14)} Parking</div>
           Runs out at <b>${fmtTime(state.parking.meterUntil)}</b>${left > 0 ? ` (in ${fmtDuration(left)})` : ' — it has run out'}</div>`;
       }
     }
@@ -1046,7 +1060,7 @@ function renderToday() {
   if (empty) {
     const sample = s.town === 'salem' || s.town === 'rockport';
     html += `<div class="empty card">
-      <div class="big">${s.town === 'salem' ? 'Plan your haunting' : `Plan ${esc(dayLabel(state.day))}`}</div>
+      <div class="big">Plan ${esc(dayLabel(state.day))}</div>
       <p>Pick places in <b>Places</b> (or tap pins and dots on the map). Add anything with a set time, like the whale watch, a tour or a dinner booking, in <b>Times</b>. The plan builds itself around them.</p>
       <div class="btns" style="justify-content:center">
         <button class="btn primary" data-act="tab" data-tab="places">Pick places</button>
@@ -1058,7 +1072,7 @@ function renderToday() {
 
   html += driveHintHtml();
   if (plan.base.assumed === 'parking' && !plan.live) {
-    html += `<div class="card small">Starting from <b>${esc(plan.base.garage || town().name)}</b> for now. Tap <b>🚗 Parked here</b> when you arrive and the plan will start from your car.</div>`;
+    html += `<div class="card small">Starting from <b>${esc(plan.base.garage || town().name)}</b> for now. Tap <b>Parked here</b> when you arrive and the plan will start from your car.</div>`;
   }
 
   const t = plan.totals;
@@ -1070,30 +1084,30 @@ function renderToday() {
     html += `<p class="small muted">Starting before ${fmtTime(toMin(s.dayStart))} to get to ${esc(plan.earlyFor)} on time.</p>`;
   }
   if (plan.live && state.done.length) {
-    html += `<p class="small muted">✓ ${state.done.length} done already. Re-planned at ${fmtTime(toMin(state.replan.time))}.</p>`;
+    html += `<p class="small muted">${state.done.length} done already. Re-planned at ${fmtTime(toMin(state.replan.time))}.</p>`;
   }
 
   html += '<ul class="timeline">';
   if (travelDay() === 'arrive' && !plan.live) {
-    html += `<li class="tl-item"><div class="tl-time">${fmtTime(toMin(TRIP_FACTS.arrive.leaveHome))}</div>
-      <div class="tl-dot" style="--c:#1f5fa8">\uD83D\uDE97</div>
+    html += `<li class="tl-item"><div class="tl-time">${tlTime(toMin(TRIP_FACTS.arrive.leaveHome))}</div>
+      <div class="tl-dot base">${icon('car', 14)}</div>
       <div class="tl-body"><b>Leave ${esc(TRIP_FACTS.home)}</b><div class="tl-meta">${fmtDuration(travelMins())} with a stop \u00B7 ${TRIP_FACTS.driveMiles} mi</div></div></li>`;
   }
   const start = items[0];
-  const baseIcon = plan.base.car ? '🚗' : plan.base.home ? '🏠' : '🏁';
-  html += `<li class="tl-item"><div class="tl-time">${fmtTime(start.depart)}</div>
-    <div class="tl-dot" style="--c:#1f5fa8">${plan.live ? '📍' : baseIcon}</div>
+  const baseIcon = icon(plan.base.car ? 'car' : plan.base.home ? 'house' : 'map-pin', 14);
+  html += `<li class="tl-item"><div class="tl-time">${tlTime(start.depart)}</div>
+    <div class="tl-dot base">${plan.live ? icon('locate', 14) : baseIcon}</div>
     <div class="tl-body"><b>${plan.live ? 'Start from where you are' : `Start at ${esc(start.name)}`}</b></div></li>`;
   for (const it of items.slice(1)) {
     html += leg(it);
     if (it.type === 'end') {
-      html += `<li class="tl-item"><div class="tl-time">${fmtTime(it.arrive)}</div>
-        <div class="tl-dot" style="--c:#1f5fa8">${baseIcon}</div>
+      html += `<li class="tl-item"><div class="tl-time">${tlTime(it.arrive)}</div>
+        <div class="tl-dot base">${baseIcon}</div>
         <div class="tl-body"><b>Back at ${esc(plan.base.car ? 'the car' : it.name)}</b>
-        ${it.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}</div></li>`;
+        ${it.warnings.map(w => `<div class="warnline">${icon('triangle-alert', 13)} ${esc(w)}</div>`).join('')}</div></li>`;
       if (travelDay() === 'depart') {
-        html += `<li class="tl-item"><div class="tl-time">${fmtTime(leaveAt())}</div>
-          <div class="tl-dot" style="--c:#1f5fa8">\uD83D\uDE97</div>
+        html += `<li class="tl-item"><div class="tl-time">${tlTime(leaveAt())}</div>
+          <div class="tl-dot base">${icon('car', 14)}</div>
           <div class="tl-body"><b>Leave for ${esc(TRIP_FACTS.home)}</b><div class="tl-meta">Home around ${fmtTime(toMin(TRIP_FACTS.depart.homeBy))}</div></div></li>`;
       }
     } else {
@@ -1103,15 +1117,15 @@ function renderToday() {
   html += '</ul>';
 
   if (plan.unscheduled.length) {
-    html += `<h3>Lost in the fog (didn't fit)</h3><ul class="list">${plan.unscheduled.map(u => `
+    html += `<h3>Didn't fit</h3><ul class="list">${plan.unscheduled.map(u => `
       <li><div class="grow"><div class="li-title">${esc(u.name)}</div><div class="small muted" style="white-space:normal">${esc(u.reason)}</div></div>
-      ${state.stops.some(x => x.id === u.key && x.priority !== 'must') ? `<button class="btn small" data-act="toggle-must" data-id="${esc(u.key)}">★ Must-see</button>` : ''}
+      ${state.stops.some(x => x.id === u.key && x.priority !== 'must') ? `<button class="btn small" data-act="toggle-must" data-id="${esc(u.key)}">${icon('star', 13)} Must-see</button>` : ''}
       </li>`).join('')}</ul>`;
   }
 
   html += `<div class="btns" style="margin-top:16px">
-    <button class="btn" data-act="ics">📅 Add trip to calendar</button>
-    <button class="btn" data-act="share-plan">🔗 Share plan</button>
+    <button class="btn" data-act="ics">${icon('calendar', 15)} Add trip to calendar</button>
+    <button class="btn" data-act="share-plan">${icon('share-2', 15)} Share plan</button>
     <button class="btn ghost" data-act="fit">Show on map</button>
   </div>
   <p class="small muted" style="margin-top:10px">Hours are typical for this time of year. Check anything important before you go. Walking assumes a ${s.pace} pace plus ${s.buffer} min per stop${s.mode === 'mixed' ? '; drives include about 8 min to park' : ''}.</p>`;
@@ -1157,15 +1171,15 @@ function placesListHtml() {
       ? [p.sub, hoursText(p), p.mins ? fmtDuration(p.mins) : '', fmtDistance(dist.get(p.id))].filter(Boolean).join(' · ')
       : [p.sub || p.tip || p.addr, fmtDistance(dist.get(p.id))].filter(Boolean).join(' · ');
     return `<li style="flex-wrap:wrap">
-      <div class="ico" style="color:${c.color}">${it?.n ? `<b>${it.n}</b>` : c.icon}</div>
+      <div class="ico" style="color:${c.color}">${it?.n ? `<b>${it.n}</b>` : icon(c.icon, 17)}</div>
       <button class="li-main" data-act="focus" data-id="${p.id}">
-        <div class="li-title">${esc(p.name)}${placeMap.has(p.id) ? ' <span class="pick">★</span>' : ''}</div>
-        <div class="li-sub">${esc(subline)}${p.tickets ? ' · 🎟️' : ''}</div>
+        <div class="li-title">${esc(p.name)}${placeMap.has(p.id) ? ` <span class="pick" title="Our pick">${icon('star', 11)}</span>` : ''}</div>
+        <div class="li-sub">${esc(subline)}${p.tickets ? ' · book ahead' : ''}</div>
       </button>
-      ${canPlan ? `<button class="btn small toggle-add ${st ? 'on' : ''}" data-act="toggle-stop" data-id="${p.id}">${st ? '✓ Added' : '+ Add'}</button>`
+      ${canPlan ? `<button class="btn small toggle-add ${st ? 'on' : ''}" data-act="toggle-stop" data-id="${p.id}">${st ? `${icon('check', 13)} Added` : `${icon('plus', 13)} Add`}</button>`
         : p.cat === 'parking' ? `<button class="btn small" data-act="park-at" data-id="${p.id}">Parked here</button>` : ''}
       ${st ? `<div style="flex-basis:100%;padding-left:44px" class="row wrap">
-        <button class="btn small ${st.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${p.id}">★ ${st.priority === 'must' ? 'Must-see' : 'Make must-see'}</button>
+        <button class="btn small ${st.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${p.id}">${icon('star', 13)} ${st.priority === 'must' ? 'Must-see' : 'Make must-see'}</button>
         ${editable ? editPlaceForm(p) : ''}
       </div>` : ''}
     </li>`;
@@ -1176,7 +1190,7 @@ function placesListHtml() {
   } else if (total > list.length) {
     html += `<p class="small muted">Showing the closest ${list.length} of ${total}. Type to search them all.</p>`;
   }
-  if (q) html += `<button class="btn small ghost" data-act="online-search">🌐 Search the web map for “${esc(ui.q)}”</button>`;
+  if (q) html += `<button class="btn small ghost" data-act="online-search">${icon('search', 13)} Search the web map for “${esc(ui.q)}”</button>`;
   return html;
 }
 
@@ -1196,11 +1210,11 @@ function renderPlaces() {
   }
   html += `<div class="chiprow">
     <button class="fchip" data-act="cat" data-cat="all" aria-pressed="${ui.cat === 'all'}">All</button>
-    <button class="fchip" data-act="cat" data-cat="plan" aria-pressed="${ui.cat === 'plan'}">✓ In plan (${state.stops.length})</button>
-    ${cats.map(([k, c]) => `<button class="fchip" data-act="cat" data-cat="${k}" aria-pressed="${ui.cat === k}">${c.icon} ${esc(c.label)}</button>`).join('')}
+    <button class="fchip" data-act="cat" data-cat="plan" aria-pressed="${ui.cat === 'plan'}">In plan (${state.stops.length})</button>
+    ${cats.map(([k, c]) => `<button class="fchip" data-act="cat" data-cat="${k}" aria-pressed="${ui.cat === k}">${icon(c.icon, 13)} ${esc(c.label)}</button>`).join('')}
   </div>
   <div id="places-list">${placesListHtml()}</div>
-  <p class="small muted" style="margin-top:12px">★ = our picks. Everything else comes from OpenStreetMap${osmFetched ? ` (updated ${esc(osmFetched)})` : ''}. Press and hold on the map to add a place of your own.</p>`;
+  <p class="small muted" style="margin-top:12px">${icon('star', 11)} = our picks. Everything else comes from OpenStreetMap${osmFetched ? ` (updated ${esc(osmFetched)})` : ''}. Press and hold on the map to add a place of your own.</p>`;
   return html;
 }
 
@@ -1243,8 +1257,8 @@ function renderTimes() {
           <div class="li-title">${esc(a.title)} ${a.booked || a.status ? apptPill(a) : ''}</div>
           <div class="li-sub">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)} · ${esc(p ? p.name : 'Pin on map')}</div>
         </button>
-        <button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">✕</button>
-        ${it?.warnings.length ? `<div style="flex-basis:100%;padding-left:44px">${it.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}</div>` : ''}
+        <button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">${icon('x', 15)}</button>
+        ${it?.warnings.length ? `<div style="flex-basis:100%;padding-left:44px">${it.warnings.map(w => `<div class="warnline">${icon('triangle-alert', 13)} ${esc(w)}</div>`).join('')}</div>` : ''}
         ${it && it.walk ? `<div style="flex-basis:100%;padding-left:44px" class="small muted">Leave by ${fmtTime(it.leaveBy)} · ${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'} from the stop before</div>` : ''}
         ${a.note ? `<div style="flex-basis:100%;padding-left:44px" class="small">${esc(a.note)}</div>` : ''}
       </li>`;
@@ -1260,7 +1274,7 @@ function renderTimes() {
     </div>
     <label class="field"><span>Where</span><select name="placeId">
       <option value="">— Pick a place —</option>
-      <option value="__map" ${pre.lat != null ? 'selected' : ''}>${pre.lat != null ? '📍 Spot picked on the map' : '📍 Pick a spot on the map…'}</option>
+      <option value="__map" ${pre.lat != null ? 'selected' : ''}>${pre.lat != null ? 'Spot picked on the map' : 'Pick a spot on the map…'}</option>
       ${placeOptions(pre.placeId)}
     </select></label>
     <label class="field"><span>Note (optional)</span><input type="text" name="note" placeholder="Confirmation #, meet at the door…" value="${esc(pre.note || '')}"></label>
@@ -1273,9 +1287,9 @@ function renderTimes() {
   if (state.breaks.length) {
     html += `<ul class="list">${state.breaks.map(b => {
       const it = plan.order.get(b.id);
-      return `<li><div class="ico">☕</div><div class="grow"><div class="li-title">${esc(b.title)}</div>
+      return `<li><div class="ico">${icon('coffee', 17)}</div><div class="grow"><div class="li-title">${esc(b.title)}</div>
         <div class="li-sub">${fmtDuration(+b.mins)} sometime ${fmtTime(toMin(b.from))}–${fmtTime(toMin(b.to))}${it ? ` · planned ${fmtTime(it.begin)}` : ' · not fitted'}</div></div>
-        <button class="btn small ghost" data-act="del-break" data-id="${b.id}" aria-label="Delete">✕</button></li>`;
+        <button class="btn small ghost" data-act="del-break" data-id="${b.id}" aria-label="Delete">${icon('x', 15)}</button></li>`;
     }).join('')}</ul>`;
   }
   html += `<div class="card"><form data-form="break">
@@ -1300,7 +1314,7 @@ function renderCar() {
     let photo = null;
     try { photo = localStorage.getItem(PHOTO); } catch { /* ignore */ }
     html += `<div class="card">
-      <div class="big">🚗 ${p.placeId ? esc(getPlace(p.placeId)?.name || 'Car') : 'Car'}</div>
+      <div class="big">${p.placeId ? esc(getPlace(p.placeId)?.name || 'Car') : 'Car'}</div>
       <div class="small">Saved at ${new Date(p.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ })}${away != null ? ` · ${fmtDistance(away)} away, about ${Math.max(1, Math.round(away / pace()))} min walk` : ''}</div>
       <div class="btns">
         ${dirLink('car', 'Walk to car', 'btn primary')}
@@ -1315,7 +1329,7 @@ function renderCar() {
       <input type="time" data-bind="parking.meterUntil" value="${p.meterUntil != null ? toHHMM(p.meterUntil) : ''}"></label>
     <p class="small muted">We'll remind you 15 minutes before, while the app is open. <button class="btn small ghost" data-act="ics">Add the reminder to your calendar</button></p>
     <div class="row wrap">
-      <label class="btn">📷 ${photo ? 'Replace photo' : 'Add a photo of the spot'}<input type="file" accept="image/*" capture="environment" data-act-change="photo" hidden></label>
+      <label class="btn">${icon('camera', 15)} ${photo ? 'Replace photo' : 'Add a photo of the spot'}<input type="file" accept="image/*" capture="environment" data-act-change="photo" hidden></label>
       ${photo ? '<button class="btn ghost" data-act="del-photo">Remove photo</button>' : ''}
     </div>
     ${photo ? `<img class="photo" src="${photo}" alt="Photo of where we parked">` : ''}
@@ -1326,7 +1340,7 @@ function renderCar() {
     <p class="small muted">The car pin can be dragged on the map if GPS put it in the wrong place.</p>`;
   } else {
     html += `<p>When you park, tap the button. Your phone saves the spot so you can walk back to it later.</p>
-      <button class="btn primary block" data-act="park-here">🚗 We parked here (use my location)</button>
+      <button class="btn primary block" data-act="park-here">${icon('car', 15)} We parked here (use my location)</button>
       <div class="btns"><button class="btn" data-act="park-pick">Pick the spot on the map</button></div>`;
   }
   // Nearby garages and lots, closest first.
@@ -1357,12 +1371,12 @@ function renderMore() {
       <label class="field"><span>First day</span><input type="date" data-bind="trip.start" value="${esc(state.trip.start)}"></label>
       <label class="field"><span>Last day</span><input type="date" data-bind="trip.end" value="${esc(state.trip.end)}"></label>
     </div>
-    <div class="card"><div class="eyebrow">🏠 Where we're staying</div>
+    <div class="card"><div class="eyebrow">${icon('house', 14)} Where we're staying</div>
       ${state.lodging ? `<div><b>${esc(state.lodging.name)}</b></div>${state.lodging.addr ? `<div class="small muted">${esc(state.lodging.addr)}</div>` : ''}` : '<div class="small">Not set yet. Rockport days start and end here.</div>'}
       <div class="small muted">Check-in from ${fmtTime(toMin(TRIP_FACTS.lodging.checkIn))} on ${esc(dayLabel(TRIP_FACTS.arrive.date))}. Leaving ${esc(dayLabel(TRIP_FACTS.depart.date))} by ${fmtTime(leaveAt())} to be home in ${esc(TRIP_FACTS.home)} by ${fmtTime(toMin(TRIP_FACTS.depart.homeBy))}.</div>
       <div class="btns"><button class="btn small" data-act="lodging-pick">Pin in the wrong spot? Move it</button></div>
     </div>
-    <p class="small muted">Each day's town, hours and start point are under the ⚙️ line at the top of the Plan tab.</p>
+    <p class="small muted">Each day's town, hours and start point are in Day settings at the top of the Plan tab.</p>
 
     <h3>Getting around</h3>
     <div class="grid2">
@@ -1379,8 +1393,8 @@ function renderMore() {
 
     <h3>Map</h3>
     <label class="field"><span>Map style</span><select data-bind="settings.mapLook">
-      <option value="haunted" ${s.mapLook !== 'daylight' ? 'selected' : ''}>🦇 Haunted night</option>
-      <option value="daylight" ${s.mapLook === 'daylight' ? 'selected' : ''}>☀️ Daylight (easier in bright sun)</option>
+      <option value="haunted" ${s.mapLook !== 'daylight' ? 'selected' : ''}>Night</option>
+      <option value="daylight" ${s.mapLook === 'daylight' ? 'selected' : ''}>Day (easier in bright sun)</option>
     </select></label>
     ${layerChecks(L_)}
     <label class="check"><input type="checkbox" data-bind="settings.mapFilter" ${s.mapFilter === 'plan' ? 'checked' : ''}> Hide our hand-picked places that aren't in the plan</label>
@@ -1389,8 +1403,8 @@ function renderMore() {
     <h3>Share &amp; back up</h3>
     <p class="small muted">Everything is saved on this phone. Send the plan to whoever you're traveling with, and when they open the link the whole trip loads on their phone.</p>
     <div class="btns">
-      <button class="btn" data-act="share-plan">🔗 Share plan link</button>
-      <button class="btn" data-act="ics">📅 Add trip to calendar</button>
+      <button class="btn" data-act="share-plan">${icon('share-2', 15)} Share plan link</button>
+      <button class="btn" data-act="ics">${icon('calendar', 15)} Add trip to calendar</button>
     </div>
     <div class="btns">
       <button class="btn ghost danger" data-act="reset">Start over</button>
@@ -1409,7 +1423,7 @@ function renderMore() {
 function layerChecks(l) {
   const row = (k, label) => `<label class="check"><input type="checkbox" data-bind="layers.${k}" ${l[k] ? 'checked' : ''}> ${label}</label>`;
   return `<div class="small muted" style="margin-top:4px">Show on the map when zoomed in:</div>
-    ${row('shop', '🔮 Shops')}${row('food', '🍽️ Restaurants, cafes &amp; bars')}${row('museum', '🏛️ Museums, galleries &amp; sights')}${row('parking', '🅿️ Parking')}`;
+    ${row('shop', 'Shops')}${row('food', 'Restaurants, cafes &amp; bars')}${row('museum', 'Museums, galleries &amp; sights')}${row('parking', 'Parking')}`;
 }
 
 const PANES = { today: renderToday, places: renderPlaces, times: renderTimes, car: renderCar, more: renderMore };
@@ -1533,7 +1547,7 @@ function toggleMust(id) {
 function markDone(key) {
   update(s => { if (!s.done.includes(key)) s.done.push(key); });
   const nxt = nextItem();
-  toast(nxt ? `Next up: ${nxt.name}` : 'All done for today! \uD83C\uDF83', { label: 'Undo', run: () => update(s => { s.done = s.done.filter(k => k !== key); }) });
+  toast(nxt ? `Next up: ${nxt.name}` : 'All done for today.', { label: 'Undo', run: () => update(s => { s.done = s.done.filter(k => k !== key); }) });
 }
 
 function skipStop(key) {
@@ -1583,7 +1597,7 @@ function loadSample() {
   ui.tab = 'today';
   renderPane();
   fitPlan();
-  toast('Summoned a sample day. Change anything you like.');
+  toast('Loaded a sample day. Change anything you like.');
 }
 
 // Share links put the whole plan in the URL after "#plan=", so nothing goes
@@ -1625,14 +1639,14 @@ function downloadICS() {
     mapsLink: it => dirUrl({ lat: it.lat, lng: it.lng, exact: true }, it.by),
     extras: [
       { uid: 'drive-there', dateStr: f.arrive.date, start: toMin(f.arrive.leaveHome), end: arriveAt(),
-        summary: '\uD83D\uDE97 Drive to Rockport', location: f.lodging.addr, alarmMin: 30,
+        summary: 'Drive to Rockport', location: f.lodging.addr, alarmMin: 30,
         description: `Leave ${f.home} at ${fmtTime(toMin(f.arrive.leaveHome))}. Check-in from ${fmtTime(toMin(f.lodging.checkIn))}.\nDirections: ${homeDirUrl(false)}` },
       { uid: 'drive-home', dateStr: f.depart.date, start: leaveAt(), end: toMin(f.depart.homeBy),
-        summary: `\uD83D\uDE97 Drive home to ${f.home}`, location: f.lodging.addr, alarmMin: 45,
+        summary: `Drive home to ${f.home}`, location: f.lodging.addr, alarmMin: 45,
         description: `Leave by ${fmtTime(leaveAt())} to be home by ${fmtTime(toMin(f.depart.homeBy))}.\nDirections: ${homeDirUrl(true)}` },
       ...REMINDERS.map(r => ({
         uid: `reminder-${r.id}`, dateStr: r.date, start: toMin(r.time), end: toMin(r.time) + 15,
-        summary: `\uD83D\uDD14 ${r.title}`, alarmMin: 0,
+        summary: `Reminder: ${r.title}`, alarmMin: 0,
         description: [r.body, ...r.links.map(l => `${l.label}: ${l.href.replace(/^tel:/, '')}`)].join('\n'),
       })),
     ],
@@ -1979,7 +1993,7 @@ function setLodging(l) {
 function askLodgingName(lat, lng) {
   // Moving the pin of our fixed rental keeps its name and address.
   if (state.lodging?.addr === TRIP_FACTS.lodging.addr) { setLodging({ ...state.lodging, lat, lng }); return; }
-  modal(`<h2>\uD83C\uDFE0 Where we're staying</h2><form data-form="lodging" data-lat="${lat}" data-lng="${lng}">
+  modal(`<h2>Where we're staying</h2><form data-form="lodging" data-lat="${lat}" data-lng="${lng}">
     <label class="field"><span>Name</span><input type="text" name="name" placeholder="Our rental, the inn\u2026" required></label>
     <div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-act="close-modal">Cancel</button></div>
   </form>`);
@@ -1988,7 +2002,7 @@ function askLodgingName(lat, lng) {
 
 function lodgingSearchModal() {
   ui.lodgingResults = ui.lodgingResults || null;
-  modal(`<h2>\uD83C\uDFE0 Where are you staying?</h2>
+  modal(`<h2>Where are you staying?</h2>
     <p class="small muted">Type the name or street address of your rental or hotel in Rockport.</p>
     <div class="searchbar"><input type="search" id="lodging-q" value="${esc(ui.lodgingQ || '')}" placeholder="e.g. 12 Main St, or the inn's name" autocomplete="off">
     <button class="btn primary" data-act="lodging-search">Search</button></div>
@@ -2048,7 +2062,7 @@ function tick() {
   const today = nowInfo();
   for (const r of REMINDERS) {
     const at = toMin(r.time);
-    if (r.date === today.dateStr && today.minutes >= at && today.minutes < at + 90) alertOnce(`rem:${r.id}`, `\uD83D\uDD14 ${r.title}`, r.body);
+    if (r.date === today.dateStr && today.minutes >= at && today.minutes < at + 90) alertOnce(`rem:${r.id}`, r.title, r.body);
   }
   if (!isTripDay() || !plan) return;
   const t = nowInfo().minutes;
@@ -2057,7 +2071,7 @@ function tick() {
     if (it.type !== 'appt' || done.has(it.key)) continue;
     const day = `${state.tripDate}:${it.key}:${it.begin}`;
     if (t >= it.leaveBy - 10 && t < it.leaveBy) alertOnce(`soon:${day}`, `Leave in ${it.leaveBy - t} min`, `${it.name} starts at ${fmtTime(it.begin)}.`);
-    if (t >= it.leaveBy && t < it.begin) alertOnce(`now:${day}`, `🧹 Time to fly to ${it.name}`, `It starts at ${fmtTime(it.begin)}, a ${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'}.`);
+    if (t >= it.leaveBy && t < it.begin) alertOnce(`now:${day}`, `Time to leave for ${it.name}`, `It starts at ${fmtTime(it.begin)}, a ${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'}.`);
   }
   const m = state.parking?.meterUntil;
   if (m != null && t >= m - 15 && t < m + 5) alertOnce(`meter:${state.tripDate}:${m}`, 'Parking runs out soon', `At ${fmtTime(m)}.`);
@@ -2089,6 +2103,10 @@ async function loadOsm() {
 }
 
 function boot() {
+  // Static icons in the page (tabs, map buttons, title).
+  document.querySelectorAll('[data-icon]').forEach(el => {
+    el.innerHTML = icon(el.dataset.icon, el.closest('.tabs') ? 20 : el.closest('.brand') ? 17 : 19);
+  });
   setSheet('half');
   // During the trip, open on today.
   const today = nowInfo().dateStr;
