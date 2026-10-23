@@ -4,7 +4,7 @@ import {
 } from './planner.js';
 import { TZ, zonedNow, zonedToDate, tzOffsetMin, sunTimes, buildICS, daysBetween, fmtDate } from './time.js';
 import { hoursOn } from './hours.js';
-import { TRIP_FACTS, applyTripFacts, arriveAt, leaveAt, travelMins } from './trip.js';
+import { TRIP_FACTS, REMINDERS, applyTripFacts, arriveAt, leaveAt, travelMins } from './trip.js';
 
 /* global L */
 
@@ -377,6 +377,19 @@ function travelCardHtml() {
     <div>Leave ${esc(f.lodging.name)} by <b>${fmtTime(leaveAt())}</b> to be home in ${esc(f.home)} by <b>${fmtTime(toMin(f.depart.homeBy))}</b>.</div>
     <div class="small muted">${drive}. Anything you add this morning is planned to finish back at the house in time to leave.</div>
     <div class="btns"><a class="btn small" href="${esc(homeDirUrl(true))}" target="_blank" rel="noopener">Driving directions home</a></div></div>`;
+}
+
+function remindersHtml(date = state.day) {
+  const list = REMINDERS.filter(r => r.date === date);
+  if (!list.length) return '';
+  const now = nowInfo();
+  return `<div class="card"><div class="eyebrow">\uD83D\uDD14 Reminders</div><ul class="list">${list.map(r => {
+    const past = now.dateStr > r.date || (now.dateStr === r.date && now.minutes > toMin(r.time) + 90);
+    return `<li style="flex-wrap:wrap;${past ? 'opacity:.55' : ''}"><div class="ico"><b>${fmtTime(toMin(r.time)).replace(/ (AM|PM)/, '')}</b></div>
+      <div class="grow"><div class="li-title" style="white-space:normal">${esc(r.title)}</div><div class="small muted">${fmtTime(toMin(r.time))} \u00B7 ${esc(r.body)}</div>
+      <div class="btns" style="margin-top:4px">${r.links.map(l => `<a class="btn small" href="${esc(l.href)}" target="_blank" rel="noopener">${esc(l.label)}</a>`).join('')}</div></div></li>`;
+  }).join('')}</ul>
+  <p class="small muted" style="margin:6px 0 0">These pop up while the app is open. For alarms you can count on, use \uD83D\uDCC5 Add trip to calendar.</p></div>`;
 }
 
 // Plans for every day of the trip (for the calendar export).
@@ -875,12 +888,19 @@ function renderDayStrip() {
   el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
+function apptPill(a) {
+  if (a?.booked) return '<span class="pill appt">Booked</span>';
+  if (a?.status === 'waitlist') return '<span class="pill must">No reservation yet</span>';
+  return '<span class="pill appt">Fixed time</span>';
+}
+
 function tl(item, opts = {}) {
   const done = state.done.includes(item.key);
   const color = item.type === 'appt' ? 'var(--plum)' : item.anywhere ? '#2e7d5b' : (CATEGORIES[getPlace(item.key)?.cat]?.color || 'var(--ink-3)');
   const p = getPlace(item.key);
   const sub = [];
-  if (item.type === 'appt') sub.push('<span class="pill appt">Fixed time</span>');
+  const appt = item.type === 'appt' ? state.appts.find(a => a.id === item.key) : null;
+  if (item.type === 'appt') sub.push(apptPill(appt));
   else if (item.priority === 'must' && !item.anywhere) sub.push('<span class="pill must">★ Must-see</span>');
   if (done) sub.push('<span class="pill done">Done</span>');
   sub.push(`<span>${fmtDuration(item.depart - item.begin)}</span>`);
@@ -893,6 +913,7 @@ function tl(item, opts = {}) {
       <div class="tl-body">
         <button class="tl-name" data-act="focus" data-id="${esc(item.key)}">${esc(item.name)}</button>
         <div class="tl-meta row wrap">${sub.join(' ')}</div>
+        ${appt?.note ? `<div class="small muted">${esc(appt.note)}</div>` : ''}
         ${item.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}
         ${opts.actions !== false && isTripDay() && !done ? `<div class="btns" style="margin-top:6px">
           <button class="btn small" data-act="done" data-id="${esc(item.key)}">✓ Done</button>
@@ -1018,6 +1039,7 @@ function renderToday() {
       <p class="muted small">${fmtDate(state.day)} · ${fmtTime(toMin(s.dayStart))} to ${fmtTime(toMin(s.dayEnd))}. Sunset is at ${fmtTime(sun().sunset)}.${clockChangeNote()}</p>`;
   }
   html += travelCardHtml();
+  html += remindersHtml();
   html += daySettingsHtml();
   if (s.startFrom === 'lodging' && !state.lodging) html += lodgingPromptHtml();
 
@@ -1218,7 +1240,7 @@ function renderTimes() {
       return `<li style="flex-wrap:wrap">
         <div class="ico" style="color:var(--plum)"><b>${fmtTime(toMin(a.time)).replace(/ (AM|PM)/, '')}</b></div>
         <button class="li-main" data-act="focus" data-id="${a.id}">
-          <div class="li-title">${esc(a.title)}${a.booked ? ' <span class="pill appt">Booked</span>' : ''}</div>
+          <div class="li-title">${esc(a.title)} ${a.booked || a.status ? apptPill(a) : ''}</div>
           <div class="li-sub">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)} · ${esc(p ? p.name : 'Pin on map')}</div>
         </button>
         <button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">✕</button>
@@ -1608,6 +1630,11 @@ function downloadICS() {
       { uid: 'drive-home', dateStr: f.depart.date, start: leaveAt(), end: toMin(f.depart.homeBy),
         summary: `\uD83D\uDE97 Drive home to ${f.home}`, location: f.lodging.addr, alarmMin: 45,
         description: `Leave by ${fmtTime(leaveAt())} to be home by ${fmtTime(toMin(f.depart.homeBy))}.\nDirections: ${homeDirUrl(true)}` },
+      ...REMINDERS.map(r => ({
+        uid: `reminder-${r.id}`, dateStr: r.date, start: toMin(r.time), end: toMin(r.time) + 15,
+        summary: `\uD83D\uDD14 ${r.title}`, alarmMin: 0,
+        description: [r.body, ...r.links.map(l => `${l.label}: ${l.href.replace(/^tel:/, '')}`)].join('\n'),
+      })),
     ],
   });
   const blob = new Blob([ics], { type: 'text/calendar' });
@@ -2018,6 +2045,11 @@ function alertOnce(key, title, body) {
 
 function tick() {
   renderChips();
+  const today = nowInfo();
+  for (const r of REMINDERS) {
+    const at = toMin(r.time);
+    if (r.date === today.dateStr && today.minutes >= at && today.minutes < at + 90) alertOnce(`rem:${r.id}`, `\uD83D\uDD14 ${r.title}`, r.body);
+  }
   if (!isTripDay() || !plan) return;
   const t = nowInfo().minutes;
   const done = new Set(state.done);
@@ -2077,7 +2109,7 @@ function boot() {
   setInterval(tick, 30000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
   // Ask for notification permission the first time a fixed time is added on the trip day.
-  if (isTripDay() && state.appts.length && 'Notification' in window && Notification.permission === 'default') {
+  if ((isTripDay() || REMINDERS.some(r => r.date === nowInfo().dateStr)) && 'Notification' in window && Notification.permission === 'default') {
     document.addEventListener('click', () => Notification.requestPermission().catch(() => {}), { once: true });
   }
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {

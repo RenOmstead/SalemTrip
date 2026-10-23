@@ -2,7 +2,7 @@
 
 A phone-friendly map and planner for our trip: **Rockport, Fri Oct 30 to Tue Nov 3, 2026**, with a day trip to **Salem on Sun Nov 1**. It also covers Gloucester (Cape Ann Whale Watch, Hammond Castle).
 
-- **Built in (fixed):** staying at 7 Old Harbor Rd, Rockport (check-in 3 PM). Fri Oct 30: leave Endicott, NY at 10 AM and arrive about 4:30 PM. Sat Oct 31: Hammond Castle guided tour at 10:30 AM, then Cape Ann Whale Watch (check in 1:00 PM for the 1:30 PM boat). Tue Nov 3: leave by 10:30 AM to be home by 5 PM. These live in `js/trip.js`.
+- **Built in (fixed):** staying at 7 Old Harbor Rd, Rockport (check-in 3 PM). Fri Oct 30: leave Endicott, NY at 10 AM and arrive about 4:30 PM. Sat Oct 31: Hammond Castle guided tour at 10:30 AM, then Cape Ann Whale Watch (check in 1:00 PM for the 1:30 PM boat). Sun Nov 1 in Salem: park at 8 AM, breakfast at the Ugly Mug, lunch at Rockafellas at 11:30, dinner at Ledger at 4:30, and the haunted history walking tour at Old Town Hall at 6:15 PM. Tue Nov 3: leave by 10:30 AM to be home by 5 PM. Reminders: book the Salem Witch Museum at 10 PM on Oct 31, and check for cancellations at Ledger and the Rockafellas Vault. These live in `js/trip.js`.
 - **A plan for every day.** Tap a day at the top. Each day has its own town, hours, places, fixed times and parking spot.
 - **Where we're staying.** Set the rental once (search, pin or "I'm there now"). Rockport days start and end there.
 - **Every place on the map.** About 60 hand-picked highlights (★), plus every shop, restaurant, cafe, bar, museum, gallery, attraction and public parking lot in Salem, Rockport and Gloucester from OpenStreetMap (900+). Zoom in to see them. Search them in **Places**, and turn types on and off in **Settings**.
