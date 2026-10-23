@@ -42,3 +42,22 @@ test('calendar includes the drives there and home', () => {
   assert.match(ics, /DTEND:20261030T203000Z/);
   assert.match(ics, /TRIGGER:-PT30M/);
 });
+
+test('Salem day: arrive at 8, breakfast, lunch, dinner, then the 6:15 tour', () => {
+  const s = { trip: { start: '2026-10-30', end: '2026-11-03' }, days: {}, factsV: 1, lodging: null };
+  days(s);
+  s.days['2026-11-01'].appts = [{ id: 'x', title: 'Dinner at Turner’s (sample)', placeId: 'turners', time: '17:30', mins: 75, note: 'Example. Edit or delete it.' }];
+  applyTripFacts(s, days);
+  const d = s.days['2026-11-01'];
+  assert.equal(d.dayStart, '08:00');
+  assert.equal(d.town, 'salem');
+  assert.deepEqual(d.appts.map(a => `${a.time} ${a.placeId}`), ['08:15 ugly-mug', '11:30 rockafellas', '16:30 ledger', '18:15 old-town-hall']);
+  assert.ok(d.stops.some(x => x.id === 'witch-museum' && x.priority === 'must'));
+});
+
+test('reminders cover the Witch Museum booking and cancellation checks', async () => {
+  const { REMINDERS } = await import('../js/trip.js');
+  const book = REMINDERS.find(r => r.id === 'witch-book');
+  assert.equal(`${book.date} ${book.time}`, '2026-10-31 22:00');
+  assert.ok(REMINDERS.filter(r => /cancellations/.test(r.title)).length >= 4);
+});
