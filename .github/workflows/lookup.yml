@@ -1,0 +1,41 @@
+name: Look up an address and drive time
+
+on:
+  workflow_dispatch:
+    inputs:
+      address:
+        description: Address to look up
+        required: false
+      from:
+        description: Drive from
+        required: false
+      to:
+        description: Drive to
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    env:
+      ADDR: ${{ inputs.address }}
+      FROM: ${{ inputs.from }}
+      TO: ${{ inputs.to }}
+      UA: SalemTrip/1.0 (personal trip planner)
+    steps:
+      - name: Address
+        if: ${{ inputs.address != '' }}
+        run: |
+          q=$(jq -rn --arg q "$ADDR" '$q|@uri')
+          curl -sS -A "$UA" "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&q=$q" \
+            | jq '.[] | {display_name, lat, lon, type, house: .address.house_number}'
+      - name: Drive time
+        if: ${{ inputs.from != '' && inputs.to != '' }}
+        run: |
+          geo() { curl -sS -A "$UA" "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=$(jq -rn --arg q "$1" '$q|@uri')" | jq -r '.[0] | "\(.lon),\(.lat)"'; }
+          A=$(geo "$FROM"); sleep 2; B=$(geo "$TO")
+          echo "from $FROM ($A) to $TO ($B)"
+          curl -sS "https://router.project-osrm.org/route/v1/driving/$A;$B?overview=false" \
+            | jq '.routes[0] | {miles: (.distance / 1609.34 | floor), hours: (.duration / 3600 * 100 | floor / 100)}'
