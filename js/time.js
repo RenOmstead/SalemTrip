@@ -111,10 +111,12 @@ function fold(line) {
 /**
  * @param {object} o
  *   days: [{dateStr, items, parking}] (or a single dateStr/items/parking),
- *   places: key -> {addr}, mapsLink: (item) => url
+ *   places: key -> {addr}, mapsLink: (item) => url,
+ *   extras: [{uid, dateStr, start, end, summary, location, description, alarmMin}]
+ *     other events, like the drives there and home (start/end in minutes)
  *   parking: {lat, lng, note, meterUntil}|null
  */
-export function buildICS({ days, dateStr, items, places = {}, parking = null, mapsLink }) {
+export function buildICS({ days, dateStr, items, places = {}, parking = null, mapsLink, extras = [] }) {
   days = days || [{ dateStr, items, parking }];
   const now = icsStamp(new Date());
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SalemTrip//Itinerary//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
@@ -160,6 +162,12 @@ export function buildICS({ days, dateStr, items, places = {}, parking = null, ma
         alarmText: `Parking runs out at ${fmtTime(parking.meterUntil)}`,
       });
     }
+  }
+  for (const x of extras) {
+    event({
+      uid: `${x.uid}-${x.dateStr}@salemtrip`, start: zonedToDate(x.dateStr, x.start), end: zonedToDate(x.dateStr, x.end),
+      summary: x.summary, location: x.location, description: x.description, alarmMin: x.alarmMin,
+    });
   }
   lines.push('END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';

@@ -193,7 +193,7 @@ export const PLACES = [
   // ---------------- Gloucester ----------------
   { id: 'cape-ann-whale-watch', name: 'Cape Ann Whale Watch', cat: 'tour', lat: 42.61570, lng: -70.65220,
     addr: "415 Main St (Rose's Wharf), Gloucester, MA", mins: 240, open: null, close: null, tickets: true,
-    tip: 'About 4 hours out to Stellwagen Bank. The season usually ends in late October, so confirm your trip is running. Arrive 30 min early. Add your boat time under Times.' },
+    tip: 'About 4 hours out to Stellwagen Bank. Check in 30 minutes before your boat, and dress warmly.' },
   { id: 'hammond-castle', name: 'Hammond Castle Museum', cat: 'museum', lat: 42.585128, lng: -70.692564,
     addr: '80 Hesperus Ave, Gloucester, MA', mins: 90, open: '09:00', close: '15:30', tickets: true,
     tip: 'A medieval-style castle on the cliffs. Last entry 2:45 PM. Book ahead if you’re arriving by car.' },
