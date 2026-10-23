@@ -59,4 +59,4 @@ npm test           # tests for the itinerary planner, time zones, sunset and cal
 | `js/app.js` | The map, the panels, parking, directions, sharing and reminders |
 | `sw.js` | Offline support for the app and the map tiles you've already seen |
 
-Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, with tiles by CARTO. Walking routes come from FOSSGIS's OSRM server and place search from Nominatim. All of these are free community services, so the app uses them lightly.
+Map data and map tiles © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. No API keys are needed. Walking routes come from FOSSGIS's OSRM server and place search from Nominatim. All of these are free community services, so the app uses them lightly.

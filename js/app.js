@@ -18,7 +18,7 @@ function defaults() {
     tripDate: '2026-11-01',
     settings: {
       dayStart: '10:00', dayEnd: '20:00', pace: 'normal', buffer: 5,
-      startFrom: 'parking', endAtStart: true, mapsApp: 'auto', tiles: 'voyager',
+      startFrom: 'parking', endAtStart: true, mapsApp: 'auto', tiles: 'osm',
       mapFilter: 'all', practice: false,
     },
     custom: [],   // places we added: {id, name, cat:'custom', lat, lng, addr, mins, open, close}
@@ -45,6 +45,8 @@ function normalize(s) {
   const out = { ...d, ...s, settings: { ...d.settings, ...(s.settings || {}) } };
   for (const k of ['custom', 'stops', 'appts', 'breaks', 'done']) if (!Array.isArray(out[k])) out[k] = [];
   if (!out.edits || typeof out.edits !== 'object') out.edits = {};
+  // Older saves may name a map style that needs an API key now.
+  if (!['osm', 'hot'].includes(out.settings.tiles)) out.settings.tiles = 'osm';
   return out;
 }
 
@@ -231,28 +233,28 @@ function nextAppt() {
 
 // ------------------------------------------------------------------ map ----
 
+// Both map styles are free and need no API key.
 const TILES = {
-  voyager: {
-    url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', sub: 'abcd', max: 20,
-    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-  },
   osm: {
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', sub: 'abc', max: 19,
     attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   },
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', sub: 'abcd', max: 20,
-    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  hot: {
+    url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', sub: 'abc', max: 19,
+    attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, style by <a href="https://www.hotosm.org/">HOT</a>, hosted by <a href="https://openstreetmap.fr/">OSM France</a>',
   },
 };
+const BACKUP_TILES = { osm: 'hot', hot: 'osm' };
 
 const map = L.map('map', { zoomControl: false, tap: false }).setView(SALEM_CENTER, 16);
 map.attributionControl.setPrefix('');
 if (innerWidth >= 900) L.control.zoom({ position: 'bottomright' }).addTo(map);
 let tileLayer = null;
 let tilesLoaded = 0;
+let tilesSwitched = false;
 function setTiles(name) {
-  const t = TILES[name] || TILES.voyager;
+  if (!TILES[name]) name = 'osm';
+  const t = TILES[name];
   if (tileLayer) tileLayer.remove();
   let ok = 0, bad = 0;
   tileLayer = L.tileLayer(t.url, { subdomains: t.sub, maxZoom: t.max, maxNativeZoom: Math.min(t.max, 19), attribution: t.attr })
@@ -261,8 +263,12 @@ function setTiles(name) {
       if (!tilesLoaded++) $('#alertbar[data-kind="tiles"]')?.setAttribute('hidden', '');
     })
     .on('tileerror', () => {
-      // If this tile server is down, switch to the other one.
-      if (++bad > 6 && ok === 0 && name !== 'osm') { setTiles('osm'); toast('Switched to backup map tiles.'); }
+      // If this tile server is down, switch to the other one (once).
+      if (++bad > 6 && ok === 0 && !tilesSwitched) {
+        tilesSwitched = true;
+        setTiles(BACKUP_TILES[name]);
+        toast('Switched to the backup map.');
+      }
     })
     .addTo(map);
 }
@@ -983,9 +989,8 @@ function renderMore() {
         <option value="google" ${s.mapsApp === 'google' ? 'selected' : ''}>Google Maps</option>
       </select></label>
       <label class="field"><span>Map style</span><select data-bind="settings.tiles">
-        <option value="voyager" ${s.tiles === 'voyager' ? 'selected' : ''}>Street (clean)</option>
         <option value="osm" ${s.tiles === 'osm' ? 'selected' : ''}>OpenStreetMap</option>
-        <option value="dark" ${s.tiles === 'dark' ? 'selected' : ''}>Dark</option>
+        <option value="hot" ${s.tiles === 'hot' ? 'selected' : ''}>OpenStreetMap (Humanitarian)</option>
       </select></label>
     </div>
     <label class="check"><input type="checkbox" data-bind="settings.mapFilter" ${s.mapFilter === 'plan' ? 'checked' : ''}> Only show places in our plan on the map</label>
