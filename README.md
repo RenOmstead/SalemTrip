@@ -2,6 +2,7 @@
 
 A phone-friendly map and planner for our trip: **Rockport, Fri Oct 30 to Tue Nov 3, 2026**, with a day trip to **Salem on Sun Nov 1**. It also covers Gloucester (Cape Ann Whale Watch, Hammond Castle).
 
+- **Built in (fixed):** staying at 7 Old Harbor Rd, Rockport (check-in 3 PM). Fri Oct 30: leave Endicott, NY at 10 AM and arrive about 4:30 PM. Sat Oct 31: Hammond Castle guided tour at 10:30 AM, then Cape Ann Whale Watch (check in 1:00 PM for the 1:30 PM boat). Tue Nov 3: leave by 10:30 AM to be home by 5 PM. These live in `js/trip.js`.
 - **A plan for every day.** Tap a day at the top. Each day has its own town, hours, places, fixed times and parking spot.
 - **Where we're staying.** Set the rental once (search, pin or "I'm there now"). Rockport days start and end there.
 - **Every place on the map.** About 60 hand-picked highlights (★), plus every shop, restaurant, cafe, bar, museum, gallery, attraction and public parking lot in Salem, Rockport and Gloucester from OpenStreetMap (900+). Zoom in to see them. Search them in **Places**, and turn types on and off in **Settings**.
@@ -56,6 +57,7 @@ npm test           # tests for the planner, opening hours, OSM import, time zone
 | `js/places.js` | Hand-picked places in Salem, Rockport and Gloucester: coordinates, typical hours, visit lengths, tips |
 | `data/osm-places.json` | Every shop, restaurant, museum and parking lot from OpenStreetMap (made by `scripts/fetch-osm.mjs`) |
 | `js/hours.js` | Reads OpenStreetMap opening hours for a given day |
+| `js/trip.js` | The fixed parts of the trip: dates, the rental, the drives, the bookings |
 | `js/planner.js` | The itinerary engine. It builds each day around fixed times and opening hours, walking or driving each leg, with a seeded search so every phone gets the same plan |
 | `js/time.js` | Salem time zone handling, sunset, and the calendar export |
 | `js/app.js` | The map, the panels, parking, directions, sharing and reminders |

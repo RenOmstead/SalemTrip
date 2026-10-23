@@ -2,13 +2,13 @@
 // fall back to the saved copy with no signal. Map tiles: use the saved copy if
 // we have one, so places you've already looked at work offline.
 
-const APP_CACHE = 'salemtrip-app-v6';
+const APP_CACHE = 'salemtrip-app-v7';
 const TILE_CACHE = 'salemtrip-tiles-v2';
 const MAX_TILES = 1200;
 
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest',
-  'css/app.css', 'js/app.js', 'js/planner.js', 'js/places.js', 'js/time.js', 'js/hours.js',
+  'css/app.css', 'js/app.js', 'js/planner.js', 'js/places.js', 'js/time.js', 'js/hours.js', 'js/trip.js',
   'data/osm-places.json',
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'vendor/leaflet/images/marker-icon.png', 'vendor/leaflet/images/marker-icon-2x.png',

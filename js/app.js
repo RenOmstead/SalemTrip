@@ -4,6 +4,7 @@ import {
 } from './planner.js';
 import { TZ, zonedNow, zonedToDate, tzOffsetMin, sunTimes, buildICS, daysBetween, fmtDate } from './time.js';
 import { hoursOn } from './hours.js';
+import { TRIP_FACTS, applyTripFacts, arriveAt, leaveAt, travelMins } from './trip.js';
 
 /* global L */
 
@@ -13,8 +14,8 @@ const STORE = 'salemtrip.v1';
 const PHOTO = 'salemtrip.parkphoto';
 const NOTIFIED = 'salemtrip.notified';
 
-const TRIP = { start: '2026-10-30', end: '2026-11-03' };
-const SALEM_DAY = '2026-11-01';
+const TRIP = { start: TRIP_FACTS.start, end: TRIP_FACTS.end };
+const SALEM_DAY = TRIP_FACTS.salemDay;
 // Everything that belongs to one day of the trip.
 const DAY_FIELDS = ['stops', 'appts', 'breaks', 'done', 'replan', 'parking'];
 const DAY_SETTINGS = ['town', 'dayStart', 'dayEnd', 'startFrom', 'endAtStart', 'mode'];
@@ -79,7 +80,7 @@ function load() {
     const raw = localStorage.getItem(STORE);
     if (raw) return normalize(JSON.parse(raw));
   } catch { /* fall through to a fresh plan */ }
-  return ensureDays(defaults());
+  return applyTripFacts(ensureDays(defaults()), ensureDays);
 }
 
 function normalize(raw) {
@@ -103,7 +104,7 @@ function normalize(raw) {
   // Older saves may name a map style that needs an API key now.
   if (!['osm', 'hot'].includes(out.settings.tiles)) out.settings.tiles = 'osm';
   if (!['haunted', 'daylight'].includes(out.settings.mapLook)) out.settings.mapLook = 'haunted';
-  return ensureDays(out);
+  return applyTripFacts(ensureDays(out), ensureDays);
 }
 
 // `state.stops`, `state.parking`, `state.settings.dayStart` and friends always
@@ -309,6 +310,7 @@ function computePlan() {
     : base;
   // A fixed time early in the day pulls the start earlier, so we get there on time.
   let startTime = live ? toMin(live.time) : toMin(s.dayStart);
+  let endTime = toMin(s.dayEnd);
   let earlyFor = null;
   if (!live) {
     for (const a of appointments) {
@@ -317,10 +319,15 @@ function computePlan() {
       if (need < startTime) { startTime = need; earlyFor = a.name; }
     }
   }
+  // The travel days are fixed: we can't start before we get here, and we
+  // have to leave in time to get home.
+  const travel = travelDay();
+  if (travel === 'arrive' && !live) { startTime = Math.max(startTime, arriveAt()); earlyFor = null; }
+  if (travel === 'depart') endTime = Math.min(endTime, leaveAt());
   const args = {
-    start, end: s.endAtStart ? base : null,
+    start, end: s.endAtStart || travel === 'depart' ? base : null,
     startTime,
-    endTime: toMin(s.dayEnd),
+    endTime,
     stops, appointments, pace: pace(), mode: s.mode, buffer: Number(s.buffer) || 0,
   };
   // Only rebuild when something the planner uses has changed.
@@ -341,6 +348,35 @@ function computePlan() {
     const a = it.type === 'appt' && state.appts.find(x => x.id === it.key);
     if (a?.placeId) plan.order.set(a.placeId, it);
   }
+}
+
+function travelDay(date = state.day) {
+  return date === TRIP_FACTS.arrive.date ? 'arrive' : date === TRIP_FACTS.depart.date ? 'depart' : null;
+}
+
+function homeDirUrl(toHome) {
+  const house = TRIP_FACTS.lodging.addr, home = TRIP_FACTS.home;
+  const [from, to] = toHome ? [house, home] : [home, house];
+  return mapsApp() === 'apple'
+    ? `https://maps.apple.com/?saddr=${encodeURIComponent(from)}&daddr=${encodeURIComponent(to)}&dirflg=d`
+    : `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(from)}&destination=${encodeURIComponent(to)}&travelmode=driving`;
+}
+
+// The drive to Rockport or home, as a card at the top of that day.
+function travelCardHtml() {
+  const travel = travelDay();
+  if (!travel) return '';
+  const f = TRIP_FACTS, drive = `about ${fmtDuration(f.driveMins)} of driving (${f.driveMiles} miles) plus a ${f.stopMins}-minute stop`;
+  if (travel === 'arrive') {
+    return `<div class="card next"><div class="eyebrow">\uD83D\uDE97 Travel day \u00B7 fixed</div>
+      <div>Leave ${esc(f.home)} at <b>${fmtTime(toMin(f.arrive.leaveHome))}</b>. Get to ${esc(f.lodging.name)} around <b>${fmtTime(arriveAt())}</b>.</div>
+      <div class="small muted">${drive}. The house is open from ${fmtTime(toMin(f.lodging.checkIn))}. Friday afternoon traffic on Route 128 can add time.</div>
+      <div class="btns"><a class="btn small" href="${esc(homeDirUrl(false))}" target="_blank" rel="noopener">Driving directions</a></div></div>`;
+  }
+  return `<div class="card next"><div class="eyebrow">\uD83D\uDE97 Heading home \u00B7 fixed</div>
+    <div>Leave ${esc(f.lodging.name)} by <b>${fmtTime(leaveAt())}</b> to be home in ${esc(f.home)} by <b>${fmtTime(toMin(f.depart.homeBy))}</b>.</div>
+    <div class="small muted">${drive}. Anything you add this morning is planned to finish back at the house in time to leave.</div>
+    <div class="btns"><a class="btn small" href="${esc(homeDirUrl(true))}" target="_blank" rel="noopener">Driving directions home</a></div></div>`;
 }
 
 // Plans for every day of the trip (for the calendar export).
@@ -833,7 +869,7 @@ function renderDayStrip() {
     const count = day.stops.length + day.appts.length;
     return `<button class="daychip" data-act="pick-day" data-day="${d}" aria-pressed="${d === state.day}">
       <span class="dc-date">${esc(dayLabel(d))}${d === today ? ' •' : ''}</span>
-      <span class="dc-town">${TOWN_ICON[day.town] || ''} ${esc(t.name)}${count ? ` · ${count}` : ''}</span>
+      <span class="dc-town">${TOWN_ICON[day.town] || ''} ${esc(t.name)}${travelDay(d) === 'arrive' ? ' · arrive' : travelDay(d) === 'depart' ? ' · home' : ''}${count ? ` · ${count}` : ''}</span>
     </button>`;
   }).join('');
   el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -896,8 +932,8 @@ function daySettingsHtml() {
         <option value="walk" ${s.mode !== 'mixed' ? 'selected' : ''}>Walking</option>
         <option value="mixed" ${s.mode === 'mixed' ? 'selected' : ''}>Walk, drive far ones</option>
       </select></label>
-      <label class="field"><span>Day starts</span><input type="time" data-bind="settings.dayStart" value="${esc(s.dayStart)}"></label>
-      <label class="field"><span>Day ends</span><input type="time" data-bind="settings.dayEnd" value="${esc(s.dayEnd)}"></label>
+      <label class="field"><span>Day starts</span><input type="time" data-bind="settings.dayStart" value="${esc(travelDay() === 'arrive' ? toHHMM(arriveAt()) : s.dayStart)}" ${travelDay() === 'arrive' ? 'disabled title="Fixed: when we get here"' : ''}></label>
+      <label class="field"><span>Day ends</span><input type="time" data-bind="settings.dayEnd" value="${esc(travelDay() === 'depart' ? toHHMM(leaveAt()) : s.dayEnd)}" ${travelDay() === 'depart' ? 'disabled title="Fixed: when we leave for home"' : ''}></label>
     </div>
     <label class="field"><span>Start the day from</span><select data-bind="settings.startFrom">${startOpts}</select></label>
     <label class="check"><input type="checkbox" data-bind="settings.endAtStart" ${s.endAtStart ? 'checked' : ''}> Finish the day back where we started</label>
@@ -981,6 +1017,7 @@ function renderToday() {
     html += `<h2>${esc(title)}</h2>
       <p class="muted small">${fmtDate(state.day)} · ${fmtTime(toMin(s.dayStart))} to ${fmtTime(toMin(s.dayEnd))}. Sunset is at ${fmtTime(sun().sunset)}.${clockChangeNote()}</p>`;
   }
+  html += travelCardHtml();
   html += daySettingsHtml();
   if (s.startFrom === 'lodging' && !state.lodging) html += lodgingPromptHtml();
 
@@ -1007,7 +1044,7 @@ function renderToday() {
       <span class="grow">${t.stops} stop${t.stops === 1 ? '' : 's'} · ~${fmtDuration(t.walkMin)} getting around</span>
       <span>${plan.items[plan.items.length - 1].type === 'end' ? `back ${fmtTime(t.finish)}` : `done ${fmtTime(t.finish)}`}</span>
     </div>`;
-  if (plan.earlyFor) {
+  if (plan.earlyFor && !travelDay()) {
     html += `<p class="small muted">Starting before ${fmtTime(toMin(s.dayStart))} to get to ${esc(plan.earlyFor)} on time.</p>`;
   }
   if (plan.live && state.done.length) {
@@ -1015,6 +1052,11 @@ function renderToday() {
   }
 
   html += '<ul class="timeline">';
+  if (travelDay() === 'arrive' && !plan.live) {
+    html += `<li class="tl-item"><div class="tl-time">${fmtTime(toMin(TRIP_FACTS.arrive.leaveHome))}</div>
+      <div class="tl-dot" style="--c:#1f5fa8">\uD83D\uDE97</div>
+      <div class="tl-body"><b>Leave ${esc(TRIP_FACTS.home)}</b><div class="tl-meta">${fmtDuration(travelMins())} with a stop \u00B7 ${TRIP_FACTS.driveMiles} mi</div></div></li>`;
+  }
   const start = items[0];
   const baseIcon = plan.base.car ? '🚗' : plan.base.home ? '🏠' : '🏁';
   html += `<li class="tl-item"><div class="tl-time">${fmtTime(start.depart)}</div>
@@ -1027,6 +1069,11 @@ function renderToday() {
         <div class="tl-dot" style="--c:#1f5fa8">${baseIcon}</div>
         <div class="tl-body"><b>Back at ${esc(plan.base.car ? 'the car' : it.name)}</b>
         ${it.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}</div></li>`;
+      if (travelDay() === 'depart') {
+        html += `<li class="tl-item"><div class="tl-time">${fmtTime(leaveAt())}</div>
+          <div class="tl-dot" style="--c:#1f5fa8">\uD83D\uDE97</div>
+          <div class="tl-body"><b>Leave for ${esc(TRIP_FACTS.home)}</b><div class="tl-meta">Home around ${fmtTime(toMin(TRIP_FACTS.depart.homeBy))}</div></div></li>`;
+      }
     } else {
       html += tl(it);
     }
@@ -1171,7 +1218,7 @@ function renderTimes() {
       return `<li style="flex-wrap:wrap">
         <div class="ico" style="color:var(--plum)"><b>${fmtTime(toMin(a.time)).replace(/ (AM|PM)/, '')}</b></div>
         <button class="li-main" data-act="focus" data-id="${a.id}">
-          <div class="li-title">${esc(a.title)}</div>
+          <div class="li-title">${esc(a.title)}${a.booked ? ' <span class="pill appt">Booked</span>' : ''}</div>
           <div class="li-sub">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)} · ${esc(p ? p.name : 'Pin on map')}</div>
         </button>
         <button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">✕</button>
@@ -1290,10 +1337,8 @@ function renderMore() {
     </div>
     <div class="card"><div class="eyebrow">🏠 Where we're staying</div>
       ${state.lodging ? `<div><b>${esc(state.lodging.name)}</b></div>${state.lodging.addr ? `<div class="small muted">${esc(state.lodging.addr)}</div>` : ''}` : '<div class="small">Not set yet. Rockport days start and end here.</div>'}
-      <div class="btns"><button class="btn small primary" data-act="lodging">${state.lodging ? 'Change' : 'Find it'}</button>
-      <button class="btn small" data-act="lodging-pick">Pick on map</button>
-      <button class="btn small ghost" data-act="lodging-here">I'm there now</button>
-      ${state.lodging ? '<button class="btn small ghost danger" data-act="lodging-clear">Clear</button>' : ''}</div>
+      <div class="small muted">Check-in from ${fmtTime(toMin(TRIP_FACTS.lodging.checkIn))} on ${esc(dayLabel(TRIP_FACTS.arrive.date))}. Leaving ${esc(dayLabel(TRIP_FACTS.depart.date))} by ${fmtTime(leaveAt())} to be home in ${esc(TRIP_FACTS.home)} by ${fmtTime(toMin(TRIP_FACTS.depart.homeBy))}.</div>
+      <div class="btns"><button class="btn small" data-act="lodging-pick">Pin in the wrong spot? Move it</button></div>
     </div>
     <p class="small muted">Each day's town, hours and start point are under the ⚙️ line at the top of the Plan tab.</p>
 
@@ -1552,9 +1597,18 @@ async function shareText(title, text, url) {
 function downloadICS() {
   const places = Object.fromEntries(allPlaces().map(p => [p.id, p]));
   for (const d of Object.values(state.days)) for (const a of d.appts) if (a.placeId) places[a.id] = places[a.placeId];
+  const f = TRIP_FACTS;
   const ics = buildICS({
     days: allDayPlans(), places,
     mapsLink: it => dirUrl({ lat: it.lat, lng: it.lng, exact: true }, it.by),
+    extras: [
+      { uid: 'drive-there', dateStr: f.arrive.date, start: toMin(f.arrive.leaveHome), end: arriveAt(),
+        summary: '\uD83D\uDE97 Drive to Rockport', location: f.lodging.addr, alarmMin: 30,
+        description: `Leave ${f.home} at ${fmtTime(toMin(f.arrive.leaveHome))}. Check-in from ${fmtTime(toMin(f.lodging.checkIn))}.\nDirections: ${homeDirUrl(false)}` },
+      { uid: 'drive-home', dateStr: f.depart.date, start: leaveAt(), end: toMin(f.depart.homeBy),
+        summary: `\uD83D\uDE97 Drive home to ${f.home}`, location: f.lodging.addr, alarmMin: 45,
+        description: `Leave by ${fmtTime(leaveAt())} to be home by ${fmtTime(toMin(f.depart.homeBy))}.\nDirections: ${homeDirUrl(true)}` },
+    ],
   });
   const blob = new Blob([ics], { type: 'text/calendar' });
   const a = document.createElement('a');
@@ -1896,6 +1950,8 @@ function setLodging(l) {
 }
 
 function askLodgingName(lat, lng) {
+  // Moving the pin of our fixed rental keeps its name and address.
+  if (state.lodging?.addr === TRIP_FACTS.lodging.addr) { setLodging({ ...state.lodging, lat, lng }); return; }
   modal(`<h2>\uD83C\uDFE0 Where we're staying</h2><form data-form="lodging" data-lat="${lat}" data-lng="${lng}">
     <label class="field"><span>Name</span><input type="text" name="name" placeholder="Our rental, the inn\u2026" required></label>
     <div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-act="close-modal">Cancel</button></div>
