@@ -26,8 +26,8 @@ test('turns OpenStreetMap elements into places', () => {
 });
 
 test('unnamed parking gets a usable name; unnamed shops are skipped', () => {
-  assert.equal(toPlace({ type: 'node', id: 9, lat: 1, lon: 1, tags: { amenity: 'parking' } }).name, 'Parking');
-  assert.equal(toPlace({ type: 'node', id: 9, lat: 1, lon: 1, tags: { shop: 'gift' } }), null);
+  assert.equal(toPlace({ type: 'node', id: 9, lat: 42.52, lon: -70.89, tags: { amenity: 'parking' } }).name, 'Parking');
+  assert.equal(toPlace({ type: 'node', id: 9, lat: 42.52, lon: -70.89, tags: { shop: 'gift' } }), null);
 });
 
 test('places are tagged with the town area they are in', async () => {
