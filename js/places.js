@@ -8,15 +8,15 @@
 // best before dark, so the planner treats them as closing soon after sunset.
 
 export const CATEGORIES = {
-  witch:    { label: 'Witch trials & spooky', color: '#7b3fb8', icon: '🧙' },
-  museum:   { label: 'Museums & historic',    color: '#b4561c', icon: '🏛️' },
-  outdoors: { label: 'Waterfront & outdoors', color: '#2e7d5b', icon: '🌊' },
-  food:     { label: 'Food & drink',          color: '#c23b5a', icon: '🍽️' },
-  shop:     { label: 'Shops',                 color: '#8a6d1f', icon: '🔮' },
-  parking:  { label: 'Parking',               color: '#1f5fa8', icon: '🅿️' },
-  transit:  { label: 'Train & ferry',         color: '#4a5568', icon: '🚆' },
-  tour:     { label: 'Tours & boats',         color: '#0f8a9c', icon: '🐋' },
-  custom:   { label: 'My places',             color: '#d9480f', icon: '📍' },
+  witch:    { label: 'Witch trials & history', color: '#7b3fb8', icon: 'skull' },
+  museum:   { label: 'Museums & sights',      color: '#b4561c', icon: 'landmark' },
+  outdoors: { label: 'Waterfront & outdoors', color: '#2e7d5b', icon: 'waves' },
+  food:     { label: 'Food & drink',          color: '#c23b5a', icon: 'utensils' },
+  shop:     { label: 'Shops',                 color: '#8a6d1f', icon: 'shopping-bag' },
+  parking:  { label: 'Parking',               color: '#1f5fa8', icon: 'circle-parking' },
+  transit:  { label: 'Train & ferry',         color: '#4a5568', icon: 'train-front' },
+  tour:     { label: 'Tours & boats',         color: '#0f8a9c', icon: 'ship' },
+  custom:   { label: 'My places',             color: '#d9480f', icon: 'map-pin' },
 };
 
 export const PLACES = [

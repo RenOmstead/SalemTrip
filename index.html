@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Salem Trip</title>
   <meta name="description" content="Our map, parking spots and day plans for Rockport, Gloucester and Salem, MA.">
-  <meta name="theme-color" content="#0e0a13">
+  <meta name="theme-color" content="#0b080f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -14,21 +14,16 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
-  <link rel="preload" href="vendor/fonts/creepster.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/cormorant-600-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
   <div id="app">
     <div id="map" aria-label="Map of Salem"></div>
     <div class="vignette" aria-hidden="true"></div>
-    <div class="bats" aria-hidden="true">
-      <div class="bat"><svg viewBox="0 0 100 40" aria-hidden="true"><path d="M45 16 47 8 49 13 51 13 53 8 55 16 75 5 98 8 90 22 84 18 78 28 70 22 62 32 56 28 50 36 44 28 38 32 30 22 22 28 16 18 10 22 2 8 25 5z"/></svg></div>
-      <div class="bat"><svg viewBox="0 0 100 40" aria-hidden="true"><path d="M45 16 47 8 49 13 51 13 53 8 55 16 75 5 98 8 90 22 84 18 78 28 70 22 62 32 56 28 50 36 44 28 38 32 30 22 22 28 16 18 10 22 2 8 25 5z"/></svg></div>
-      <div class="bat"><svg viewBox="0 0 100 40" aria-hidden="true"><path d="M45 16 47 8 49 13 51 13 53 8 55 16 75 5 98 8 90 22 84 18 78 28 70 22 62 32 56 28 50 36 44 28 38 32 30 22 22 28 16 18 10 22 2 8 25 5z"/></svg></div>
-    </div>
 
     <header class="topbar">
-      <div class="brand"><span class="jack">🎃</span><span class="brand-name"> Salem Trip</span></div>
+      <div class="brand glass"><span class="brand-mark" data-icon="moon"></span><span class="brand-name">Salem Trip</span></div>
       <div class="chips" id="chips"></div>
     </header>
 
@@ -39,19 +34,19 @@
     </div>
 
     <div class="fabs" id="fabs">
-      <button class="fab round" id="btn-locate" data-act="locate" title="Show where I am" aria-label="Show where I am">◎</button>
-      <button class="fab round" data-act="fit" title="Show the whole plan" aria-label="Show the whole plan">⤢</button>
-      <button class="fab primary" data-act="park-here" title="Save where we parked">🚗 Parked here</button>
+      <button class="fab round glass" id="btn-locate" data-act="locate" title="Show where I am" aria-label="Show where I am"><span data-icon="locate"></span></button>
+      <button class="fab round glass" data-act="fit" title="Show the whole plan" aria-label="Show the whole plan"><span data-icon="maximize-2"></span></button>
+      <button class="fab primary" data-act="park-here" title="Save where we parked"><span data-icon="car"></span> Parked here</button>
     </div>
 
     <section class="sheet" id="sheet" aria-label="Trip planner">
       <div class="sheet-handle" id="sheet-handle" role="button" aria-label="Resize panel"><span></span></div>
       <nav class="tabs" role="tablist">
-        <button role="tab" data-tab="today"><span class="ti">📜</span>Plan</button>
-        <button role="tab" data-tab="places"><span class="ti">🏚️</span>Places</button>
-        <button role="tab" data-tab="times"><span class="ti">⏳</span>Times</button>
-        <button role="tab" data-tab="car"><span class="ti">🚗</span>Car</button>
-        <button role="tab" data-tab="more"><span class="ti">🔮</span>Settings</button>
+        <button role="tab" data-tab="today"><span class="ti" data-icon="scroll-text"></span>Plan</button>
+        <button role="tab" data-tab="places"><span class="ti" data-icon="map"></span>Places</button>
+        <button role="tab" data-tab="times"><span class="ti" data-icon="hourglass"></span>Times</button>
+        <button role="tab" data-tab="car"><span class="ti" data-icon="car"></span>Car</button>
+        <button role="tab" data-tab="more"><span class="ti" data-icon="sliders-horizontal"></span>Settings</button>
       </nav>
       <div class="daystrip" id="daystrip" aria-label="Trip days"></div>
       <div class="panes">
