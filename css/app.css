@@ -1,52 +1,37 @@
+@font-face {
+  font-family: "Creepster";
+  src: url("../vendor/fonts/creepster.woff2") format("woff2");
+  font-display: swap;
+}
+
+/* Night in Salem: always dark, pumpkin orange, potion purple, bone white. */
 :root {
-  --bg: #fbf8f4;
-  --panel: #ffffff;
-  --panel-2: #f4efe8;
-  --ink: #23182e;
-  --ink-2: #5e5368;
-  --ink-3: #8a8093;
-  --line: #e6dfd6;
-  --accent: #e8711a;
-  --accent-ink: #ffffff;
-  --accent-soft: #fde9d8;
-  --plum: #4b2a6b;
-  --plum-soft: #efe6f7;
-  --good: #2e7d5b;
-  --good-soft: #e1f2ea;
-  --warn: #b5470b;
-  --warn-soft: #fdeadf;
-  --danger: #b4233c;
-  --me: #1a73e8;
-  --shadow: 0 8px 28px rgba(35, 24, 46, .18);
+  --bg: #0e0a13;
+  --panel: #19111f;
+  --panel-2: #231829;
+  --ink: #f4eadb;
+  --ink-2: #cdbcd6;
+  --ink-3: #9583a3;
+  --line: #352640;
+  --accent: #ff7b1c;
+  --accent-ink: #1c0d02;
+  --accent-soft: #3b1f0b;
+  --plum: #c193f5;
+  --plum-soft: #2d1c3d;
+  --good: #8ee08a;
+  --good-soft: #17301b;
+  --warn: #ffb35c;
+  --warn-soft: #3a2310;
+  --danger: #ff6b81;
+  --me: #6ec1ff;
+  --glow: 0 0 18px rgba(255, 123, 28, .45);
+  --shadow: 0 8px 28px rgba(0, 0, 0, .55);
   --radius: 14px;
   --sheet-peek: 132px;
   --safe-b: env(safe-area-inset-bottom, 0px);
   --safe-t: env(safe-area-inset-top, 0px);
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #17111d;
-    --panel: #211a29;
-    --panel-2: #2b2335;
-    --ink: #f3edf7;
-    --ink-2: #c4b9cf;
-    --ink-3: #958aa1;
-    --line: #3a3045;
-    --accent: #f28c38;
-    --accent-ink: #1b1209;
-    --accent-soft: #3d2614;
-    --plum: #c9a5ee;
-    --plum-soft: #34263f;
-    --good: #6fcf9f;
-    --good-soft: #1c3329;
-    --warn: #f5a066;
-    --warn-soft: #3b2417;
-    --danger: #ff8197;
-    --shadow: 0 8px 28px rgba(0, 0, 0, .5);
-    color-scheme: dark;
-  }
+  --spooky: "Creepster", "Chiller", fantasy;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -64,7 +49,7 @@ button { cursor: pointer; }
 [hidden] { display: none !important; }
 
 #app { position: fixed; inset: 0; }
-#map { position: absolute; inset: 0; background: #e9e4dc; z-index: 0; }
+#map { position: absolute; inset: 0; background: #1b1222; z-index: 0; }
 
 /* ---------- Top bar ---------- */
 .topbar {
@@ -176,8 +161,7 @@ p { margin: 0 0 10px; }
   text-decoration: none; white-space: nowrap; min-height: 40px;
 }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn.plum { background: var(--plum); border-color: var(--plum); color: #fff; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .btn.plum { color: #1b1209; } }
+.btn.plum { background: var(--plum); border-color: var(--plum); color: #1a0f24; }
 .btn.ghost { background: none; border-color: transparent; color: var(--ink-2); }
 .btn.small { padding: 6px 10px; min-height: 32px; font-size: 13px; border-radius: 9px; }
 .btn.danger { color: var(--danger); }
@@ -297,3 +281,62 @@ details.edit[open] { background: var(--panel-2); border-radius: 10px; padding: 8
 .empty { text-align: center; padding: 18px 8px; color: var(--ink-2); }
 .empty .big { margin-bottom: 6px; }
 kbd { font: inherit; font-weight: 700; }
+
+/* ---------- Spooky touches ---------- */
+.brand { font-family: var(--spooky); font-weight: 400; font-size: 21px; letter-spacing: .04em; color: var(--accent); padding: 4px 14px; text-shadow: 0 0 10px rgba(255, 123, 28, .55); }
+.brand .jack { display: inline-block; animation: flicker 4s infinite; }
+h2, .empty .big { font-family: var(--spooky); font-weight: 400; font-size: 26px; letter-spacing: .03em; color: var(--accent); text-shadow: 0 0 12px rgba(255, 123, 28, .35); }
+.card.next { border: 1px solid rgba(193, 147, 245, .35); box-shadow: 0 0 22px rgba(193, 147, 245, .18) inset; }
+.card.next .eyebrow { color: var(--plum); }
+.btn.primary, .fab.primary { box-shadow: var(--glow); }
+.sheet { border-top: 1px solid rgba(255, 123, 28, .25); box-shadow: 0 -8px 34px rgba(0, 0, 0, .6), 0 -1px 18px rgba(255, 123, 28, .12); }
+.brand, .chip, .fab { border: 1px solid var(--line); }
+.tabs button[aria-selected="true"] { box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* Pins glow like lanterns. */
+.pin:not(.small) { box-shadow: 0 0 0 2px rgba(0,0,0,.35), 0 0 14px 2px var(--c); border-color: #f4eadb; }
+.pin.small { border-color: rgba(244, 234, 219, .7); }
+.car-pin { background: #23466e; border-color: #f4eadb; box-shadow: 0 0 16px rgba(110, 193, 255, .6); }
+.me-dot { background: var(--me); border-color: #f4eadb; }
+
+/* The haunted map: OpenStreetMap, turned to night. */
+.map-haunted .leaflet-tile {
+  filter: invert(1) hue-rotate(180deg) brightness(1.25) contrast(.8) sepia(.3) hue-rotate(240deg) saturate(1.5);
+}
+.leaflet-container .leaflet-control-attribution { background: rgba(14, 10, 19, .75); color: var(--ink-3); }
+.leaflet-container .leaflet-control-attribution a { color: var(--plum); }
+.leaflet-bar a { background: var(--panel); color: var(--ink); border-color: var(--line); }
+
+/* Dark corners, like the edge of the lantern light. */
+.vignette {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(ellipse at 50% 40%, transparent 55%, rgba(8, 4, 12, .55) 100%);
+}
+
+/* Bats. */
+.bats { position: absolute; inset: 0; z-index: 2; pointer-events: none; overflow: hidden; }
+.bat { position: absolute; left: 0; top: 0; width: 46px; opacity: 0; animation: fly 26s linear infinite; }
+.bat svg { display: block; width: 100%; fill: #07040a; filter: drop-shadow(0 0 3px rgba(193, 147, 245, .5)); animation: flap .22s ease-in-out infinite alternate; transform-origin: 50% 40%; }
+.bat:nth-child(2) { width: 30px; animation-duration: 31s; animation-delay: -9s; }
+.bat:nth-child(2) svg { animation-duration: .18s; }
+.bat:nth-child(3) { width: 38px; animation-duration: 37s; animation-delay: -21s; }
+.bat:nth-child(3) svg { animation-duration: .26s; }
+@keyframes fly {
+  0%   { opacity: 0; transform: translate(-60px, 26vh) rotate(-6deg); }
+  2%   { opacity: .95; }
+  22%  { transform: translate(55vw, 12vh) rotate(4deg); }
+  38%  { opacity: .95; transform: translate(105vw, 20vh) rotate(-3deg); }
+  39%, 100% { opacity: 0; transform: translate(110vw, 20vh); }
+}
+@keyframes flap { from { transform: scaleY(1); } to { transform: scaleY(.3); } }
+@keyframes flicker {
+  0%, 100% { opacity: 1; filter: drop-shadow(0 0 6px rgba(255, 123, 28, .9)); }
+  45% { opacity: .85; filter: drop-shadow(0 0 2px rgba(255, 123, 28, .5)); }
+  50% { opacity: 1; filter: drop-shadow(0 0 9px rgba(255, 140, 40, 1)); }
+  53% { opacity: .7; }
+}
+@media (min-width: 900px) { .vignette, .bats { left: 420px; } }
+@media (prefers-reduced-motion: reduce) {
+  .bats { display: none; }
+  .brand .jack { animation: none; }
+}
