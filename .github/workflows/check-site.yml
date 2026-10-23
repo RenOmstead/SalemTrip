@@ -1,0 +1,24 @@
+name: Check live site
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pages settings
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api repos/${{ github.repository }}/pages
+      - name: What the live site serves
+        run: |
+          base="https://renomstead.github.io/SalemTrip"
+          echo "== index.html headers"; curl -sSI "$base/" | head -20
+          echo "== sw.js cache names"; curl -sS "$base/sw.js" | grep -n "CACHE = "
+          echo "== app.js map servers"; curl -sS "$base/js/app.js" | grep -o "cartocdn[^']*\|tile\.openstreetmap\.[a-z]*\|map-haunted" | sort | uniq -c
+          echo "== creepster font"; curl -sS -o /dev/null -w "%{http_code} %{size_download} bytes\n" "$base/vendor/fonts/creepster.woff2"
