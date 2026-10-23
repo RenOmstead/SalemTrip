@@ -1,8 +1,9 @@
-import { PLACES, CATEGORIES, SALEM_CENTER, SALEM_BOUNDS } from './places.js';
+import { PLACES, CATEGORIES, TOWNS } from './places.js';
 import {
-  buildItinerary, toMin, toHHMM, fmtTime, fmtDuration, fmtDistance, walkMeters, walkMinutes, PACES,
+  buildItinerary, toMin, toHHMM, fmtTime, fmtDuration, fmtDistance, haversine, walkMeters, walkMinutes, legTime, PACES,
 } from './planner.js';
 import { TZ, zonedNow, zonedToDate, tzOffsetMin, sunTimes, buildICS, daysBetween, fmtDate } from './time.js';
+import { hoursOn } from './hours.js';
 
 /* global L */
 
@@ -12,24 +13,65 @@ const STORE = 'salemtrip.v1';
 const PHOTO = 'salemtrip.parkphoto';
 const NOTIFIED = 'salemtrip.notified';
 
-function defaults() {
+const TRIP = { start: '2026-10-30', end: '2026-11-03' };
+const SALEM_DAY = '2026-11-01';
+// Everything that belongs to one day of the trip.
+const DAY_FIELDS = ['stops', 'appts', 'breaks', 'done', 'replan', 'parking'];
+const DAY_SETTINGS = ['town', 'dayStart', 'dayEnd', 'startFrom', 'endAtStart', 'mode'];
+
+function datesBetween(a, b) {
+  const out = [];
+  let [y, m, d] = a.split('-').map(Number);
+  for (let i = 0; i < 21; i++) {
+    const t = new Date(Date.UTC(y, m - 1, d + i));
+    const iso = t.toISOString().slice(0, 10);
+    if (iso > b) break;
+    out.push(iso);
+  }
+  return out;
+}
+
+function newDay(date, trip = TRIP) {
+  const salem = date === SALEM_DAY;
   return {
-    v: 1,
-    tripDate: '2026-11-01',
-    settings: {
-      dayStart: '10:00', dayEnd: '20:00', pace: 'normal', buffer: 5,
-      startFrom: 'parking', endAtStart: true, mapsApp: 'auto', tiles: 'osm', mapLook: 'haunted',
-      mapFilter: 'all', practice: false,
-    },
-    custom: [],   // places we added: {id, name, cat:'custom', lat, lng, addr, mins, open, close}
-    edits: {},    // placeId -> overrides {mins, open, close, lat, lng}
+    town: salem ? 'salem' : 'rockport',
+    dayStart: date === trip.start ? '13:00' : '10:00',
+    dayEnd: date === trip.end ? '13:00' : '20:00',
+    startFrom: salem ? 'parking' : 'lodging', endAtStart: true,
+    mode: salem ? 'walk' : 'mixed', // 'mixed': walk short hops, drive longer ones
     stops: [],    // places we want to see: {id, priority:'must'|'nice'}
     appts: [],    // fixed times: {id, title, placeId?, lat?, lng?, time:'HH:MM', mins, note}
     breaks: [],   // meals and rests: {id, title, from, to, mins}
     done: [],     // keys of stops/appointments/breaks we've finished
+    replan: null, // {time:'HH:MM', lat, lng} when re-planned during the day
     parking: null, // {lat, lng, at, note, meterUntil (min), placeId}
-    replan: null,  // {time:'HH:MM', lat, lng} when re-planned during the day
   };
+}
+
+function defaults() {
+  return {
+    v: 2,
+    trip: { ...TRIP },
+    day: TRIP.start,
+    lodging: null, // {name, lat, lng, addr}
+    settings: {
+      pace: 'normal', buffer: 5, mapsApp: 'auto', tiles: 'osm', mapLook: 'haunted',
+      mapFilter: 'all', practice: false,
+      layers: { shop: true, food: true, museum: true, parking: true },
+    },
+    custom: [],   // places we added: {id, name, cat, lat, lng, addr, mins, open, close, oh?}
+    edits: {},    // placeId -> overrides {mins, open, close, lat, lng}
+    days: {},     // 'YYYY-MM-DD' -> newDay()
+  };
+}
+
+function ensureDays(s) {
+  for (const date of datesBetween(s.trip.start, s.trip.end)) {
+    s.days[date] = { ...newDay(date, s.trip), ...(s.days[date] || {}) };
+    for (const k of ['stops', 'appts', 'breaks', 'done']) if (!Array.isArray(s.days[date][k])) s.days[date][k] = [];
+  }
+  if (!s.days[s.day]) s.day = s.trip.start;
+  return s;
 }
 
 function load() {
@@ -37,27 +79,61 @@ function load() {
     const raw = localStorage.getItem(STORE);
     if (raw) return normalize(JSON.parse(raw));
   } catch { /* fall through to a fresh plan */ }
-  return defaults();
+  return ensureDays(defaults());
 }
 
-function normalize(s) {
+function normalize(raw) {
   const d = defaults();
-  const out = { ...d, ...s, settings: { ...d.settings, ...(s.settings || {}) } };
-  for (const k of ['custom', 'stops', 'appts', 'breaks', 'done']) if (!Array.isArray(out[k])) out[k] = [];
+  let out;
+  if (raw.v === 2) {
+    out = { ...d, ...raw, trip: { ...d.trip, ...(raw.trip || {}) }, settings: { ...d.settings, ...(raw.settings || {}) }, days: raw.days || {} };
+  } else {
+    // Version 1 was a single Salem day. Move it into the Salem day of the trip.
+    out = { ...d, custom: raw.custom || [], edits: raw.edits || {}, settings: { ...d.settings } };
+    for (const k of ['pace', 'buffer', 'mapsApp', 'mapFilter', 'practice']) if (raw.settings?.[k] != null) out.settings[k] = raw.settings[k];
+    const day = newDay(SALEM_DAY);
+    for (const k of DAY_FIELDS) if (raw[k] != null) day[k] = raw[k];
+    for (const k of ['dayStart', 'dayEnd', 'startFrom', 'endAtStart']) if (raw.settings?.[k] != null) day[k] = raw.settings[k];
+    out.days = { [SALEM_DAY]: day };
+    out.day = SALEM_DAY;
+  }
+  out.settings.layers = { ...d.settings.layers, ...(out.settings.layers || {}) };
+  if (!Array.isArray(out.custom)) out.custom = [];
   if (!out.edits || typeof out.edits !== 'object') out.edits = {};
   // Older saves may name a map style that needs an API key now.
   if (!['osm', 'hot'].includes(out.settings.tiles)) out.settings.tiles = 'osm';
   if (!['haunted', 'daylight'].includes(out.settings.mapLook)) out.settings.mapLook = 'haunted';
-  return out;
+  return ensureDays(out);
 }
 
-let state = load();
+// `state.stops`, `state.parking`, `state.settings.dayStart` and friends always
+// mean the day picked in the day strip. The data lives in state.days[date];
+// these accessors keep the rest of the code simple. They aren't enumerable,
+// so they're never saved twice.
+function attachDay(s) {
+  for (const k of DAY_FIELDS) {
+    Object.defineProperty(s, k, {
+      get() { return this.days[this.day][k]; }, set(v) { this.days[this.day][k] = v; },
+      configurable: true, enumerable: false,
+    });
+  }
+  Object.defineProperty(s, 'tripDate', { get() { return this.day; }, configurable: true, enumerable: false });
+  for (const k of DAY_SETTINGS) {
+    Object.defineProperty(s.settings, k, {
+      get: () => s.days[s.day][k], set: v => { s.days[s.day][k] = v; },
+      configurable: true, enumerable: false,
+    });
+  }
+  return s;
+}
+
+let state = attachDay(load());
 let plan = null;
 let lastPlanKey = '';
 let fix = null;           // latest GPS fix {lat, lng, acc, at}
 let watchId = null;
 const ui = {
-  tab: 'today', cat: 'all', results: null, searching: false, route: null, pick: null,
+  tab: 'today', cat: 'all', q: '', results: null, searching: false, route: null, pick: null,
   sheet: 'half', alerts: [],
 };
 let notified = new Set();
@@ -80,36 +156,66 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const uid = (p = '') => p + Math.random().toString(36).slice(2, 9);
 const placeMap = new Map(PLACES.map(p => [p.id, p]));
 
-function getPlace(id) {
-  const base = placeMap.get(id) || state.custom.find(p => p.id === id);
-  if (!base) return null;
-  const e = state.edits[id];
-  return e ? { ...base, ...e } : base;
+// Every shop, restaurant, museum and parking lot from OpenStreetMap, loaded
+// from data/osm-places.json after the app starts.
+let osmPlaces = [];
+let osmFetched = "";
+const osmMap = new Map();
+
+const town = () => TOWNS[state.settings.town] || TOWNS.rockport;
+const townLatLng = () => ({ lat: town().center[0], lng: town().center[1] });
+
+// Hours for the selected day from an OpenStreetMap-style opening_hours string.
+function hoursFor(base) {
+  const h = hoursOn(base.oh, state.day);
+  if (!h) return base.open || base.close ? {} : { hoursUnknown: true };
+  if (h.closed) return { closedDay: true, open: null, close: null };
+  return { open: toHHMM(h.open), close: h.close >= 1440 ? '23:59' : toHHMM(h.close), closedDay: false };
 }
+
+function getPlace(id) {
+  const base = placeMap.get(id) || state.custom.find(p => p.id === id) || osmMap.get(id);
+  if (!base) return null;
+  let p = base;
+  if (p.oh) p = { ...p, ...hoursFor(p) };
+  else if (p.osm) p = { ...p, hoursUnknown: true };
+  const e = state.edits[id];
+  return e ? { ...p, ...e } : p;
+}
+// Hand-picked places plus our own. OpenStreetMap places are drawn separately.
 const allPlaces = () => [...PLACES, ...state.custom].map(p => getPlace(p.id));
 const inPlan = id => state.stops.some(s => s.id === id);
 const nowInfo = () => zonedNow();
 const isTripDay = () => state.settings.practice || nowInfo().dateStr === state.tripDate;
-const sun = () => sunTimes(state.tripDate, SALEM_CENTER[0], SALEM_CENTER[1]);
+const sun = () => sunTimes(state.tripDate, town().center[0], town().center[1]);
 const pace = () => PACES[state.settings.pace] || PACES.normal;
+const dayLabel = date => fmtDate(date).replace(',', '');
 
 function hoursText(p) {
-  if (p.open == null && p.close == null) return p.daylight ? 'Best in daylight' : 'Always open';
-  return `${fmtTime(toMin(p.open ?? '00:00'))}–${fmtTime(toMin(p.close ?? '23:59'))}`;
+  if (p.closedDay) return `Closed ${dayLabel(state.day)}`;
+  if (p.open == null && p.close == null) return p.hoursUnknown ? 'Hours not listed' : p.daylight ? 'Best in daylight' : 'Always open';
+  if (p.close == null) return `From ${fmtTime(toMin(p.open))}${p.daylight ? ', best in daylight' : ''}`;
+  return `${fmtTime(toMin(p.open ?? '00:00'))}–${fmtTime(toMin(p.close))}`;
 }
 
 function homeBase() {
-  const s = state.settings;
+  const s = state.settings, t = town();
+  if (s.startFrom === 'lodging') {
+    if (state.lodging) return { lat: state.lodging.lat, lng: state.lodging.lng, name: state.lodging.name || 'Where we’re staying', home: true };
+    return { ...townLatLng(), name: t.name, home: true, assumed: 'lodging' };
+  }
   if (s.startFrom === 'parking') {
     if (state.parking) return { lat: state.parking.lat, lng: state.parking.lng, name: 'Car', car: true };
-    const g = getPlace('museum-place-garage');
-    return { lat: g.lat, lng: g.lng, name: 'Car (Museum Place Garage)', car: true, assumed: true };
+    const g = t.parking && getPlace(t.parking);
+    if (g) return { lat: g.lat, lng: g.lng, name: `Car (${g.name})`, car: true, assumed: 'parking', garage: g.name };
+    return { ...townLatLng(), name: `Car (${t.name})`, car: true, assumed: 'parking' };
   }
-  const p = getPlace(s.startFrom) || getPlace('museum-place-garage');
-  return { lat: p.lat, lng: p.lng, name: p.name, id: p.id };
+  const p = getPlace(s.startFrom);
+  if (p) return { lat: p.lat, lng: p.lng, name: p.name, id: p.id };
+  return { ...townLatLng(), name: t.name };
 }
 
-// Where a directions link should point. Curated places use their name and
+// Where a directions link should point. Hand-picked places use their name and
 // street address, so the maps app finds the actual door. Anything else uses
 // the coordinates.
 function targetFor(key) {
@@ -117,6 +223,7 @@ function targetFor(key) {
     const b = key === 'car' && state.parking ? { ...state.parking, name: 'Car' } : homeBase();
     return { lat: b.lat, lng: b.lng, name: b.name, exact: true };
   }
+  if (key === 'home' && state.lodging) return { ...state.lodging, exact: true };
   const appt = state.appts.find(a => a.id === key);
   if (appt) {
     if (appt.placeId) return targetFor(appt.placeId);
@@ -124,7 +231,7 @@ function targetFor(key) {
   }
   const p = getPlace(key);
   if (!p) return null;
-  const exact = p.cat === 'custom' || !p.addr || state.edits[key]?.lat != null;
+  const exact = p.cat === 'custom' || p.osm || !p.addr || state.edits[key]?.lat != null;
   return { lat: p.lat, lng: p.lng, name: p.name, addr: p.addr, exact };
 }
 
@@ -136,18 +243,26 @@ function mapsApp() {
   return ios ? 'apple' : 'google';
 }
 
-function dirUrl(t, app = mapsApp()) {
+// `by` is 'walk' or 'drive'.
+function dirUrl(t, by = 'walk', app = mapsApp()) {
   if (!t) return '#';
   if (app === 'apple') {
     const d = t.exact ? `${t.lat},${t.lng}` : encodeURIComponent(t.addr);
-    return `https://maps.apple.com/?daddr=${d}&dirflg=w`;
+    return `https://maps.apple.com/?daddr=${d}&dirflg=${by === 'drive' ? 'd' : 'w'}`;
   }
   const d = t.exact ? `${t.lat},${t.lng}` : encodeURIComponent(`${t.name}, ${t.addr}`);
-  return `https://www.google.com/maps/dir/?api=1&destination=${d}&travelmode=walking`;
+  return `https://www.google.com/maps/dir/?api=1&destination=${d}&travelmode=${by === 'drive' ? 'driving' : 'walking'}`;
 }
 
-function dirLink(key, label = 'Directions', cls = 'btn small') {
-  return `<a class="${cls}" href="${esc(dirUrl(targetFor(key)))}" target="_blank" rel="noopener">${label}</a>`;
+function dirLink(key, label = 'Directions', cls = 'btn small', by = 'walk') {
+  return `<a class="${cls}" href="${esc(dirUrl(targetFor(key), by))}" target="_blank" rel="noopener">${label}</a>`;
+}
+
+// OpenStreetMap places get copied into our own list when we use them, so the
+// plan keeps working (and shares) even if the downloaded list changes.
+function adopt(s, id) {
+  const p = osmMap.get(id);
+  if (p && !s.custom.some(c => c.id === id)) s.custom.push({ ...p, osm: true });
 }
 
 // ----------------------------------------------------------- the plan ----
@@ -168,7 +283,7 @@ function computePlan() {
     if (p.daylight) close = Math.min(close ?? 1440, sunset + 20);
     stops.push({
       key: p.id, name: p.name, lat: p.lat, lng: p.lng, mins: Number(p.mins) || 0,
-      open: toMin(p.open), close, priority: x.priority || 'nice',
+      open: toMin(p.open), close, priority: x.priority || 'nice', closed: !!p.closedDay,
     });
   }
   for (const b of state.breaks) {
@@ -192,11 +307,21 @@ function computePlan() {
   const start = live
     ? { lat: live.lat, lng: live.lng, name: 'You', live: true }
     : base;
+  // A fixed time early in the day pulls the start earlier, so we get there on time.
+  let startTime = live ? toMin(live.time) : toMin(s.dayStart);
+  let earlyFor = null;
+  if (!live) {
+    for (const a of appointments) {
+      const leg = legTime(base, a, { pace: pace(), mode: s.mode });
+      const need = a.start - leg.mins - (leg.mins > 0 ? Number(s.buffer) || 0 : 0);
+      if (need < startTime) { startTime = need; earlyFor = a.name; }
+    }
+  }
   const args = {
     start, end: s.endAtStart ? base : null,
-    startTime: live ? toMin(live.time) : toMin(s.dayStart),
+    startTime,
     endTime: toMin(s.dayEnd),
-    stops, appointments, pace: pace(), buffer: Number(s.buffer) || 0,
+    stops, appointments, pace: pace(), mode: s.mode, buffer: Number(s.buffer) || 0,
   };
   // Only rebuild when something the planner uses has changed.
   const key = JSON.stringify(args);
@@ -205,6 +330,7 @@ function computePlan() {
   plan = buildItinerary(args);
   plan.base = base;
   plan.live = !!live;
+  plan.earlyFor = earlyFor;
   // Number the stops in order, and give each place pin its number.
   plan.order = new Map();
   let n = 0;
@@ -215,6 +341,21 @@ function computePlan() {
     const a = it.type === 'appt' && state.appts.find(x => x.id === it.key);
     if (a?.placeId) plan.order.set(a.placeId, it);
   }
+}
+
+// Plans for every day of the trip (for the calendar export).
+function allDayPlans() {
+  const keep = state.day, out = [];
+  for (const date of datesBetween(state.trip.start, state.trip.end)) {
+    state.day = date;
+    lastPlanKey = '';
+    computePlan();
+    out.push({ dateStr: date, items: plan.items, parking: state.parking });
+  }
+  state.day = keep;
+  lastPlanKey = '';
+  computePlan();
+  return out;
 }
 
 // The next thing on the list that isn't done yet.
@@ -247,7 +388,7 @@ const TILES = {
 };
 const BACKUP_TILES = { osm: 'hot', hot: 'osm' };
 
-const map = L.map('map', { zoomControl: false, tap: false }).setView(SALEM_CENTER, 16);
+const map = L.map('map', { zoomControl: false, tap: false }).setView(town().center, 16);
 map.attributionControl.setPrefix('');
 if (innerWidth >= 900) L.control.zoom({ position: 'bottomright' }).addTo(map);
 let tileLayer = null;
@@ -291,10 +432,15 @@ setTimeout(() => {
   bar.hidden = false;
 }, 12000);
 
+// OpenStreetMap places are small dots drawn on one canvas, so hundreds of them
+// stay fast on a phone. They appear once you zoom in.
+const osmRenderer = L.canvas({ padding: 0.3, tolerance: 8 });
+const osmLayer = L.layerGroup();
+const OSM_MIN_ZOOM = { parking: 15, shop: 16, food: 16, museum: 15 };
 const placesLayer = L.layerGroup().addTo(map);
 const planLine = L.polyline([], { color: '#e8711a', weight: 4, opacity: .75, dashArray: '2 8', lineCap: 'round' }).addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
-let carMarker = null, meMarker = null, meCircle = null;
+let carMarker = null, meMarker = null, meCircle = null, homeMarker = null;
 const markerById = new Map();
 
 function pinIcon(p, it, opts = {}) {
@@ -338,6 +484,18 @@ function renderMap() {
   const pts = plan.items.filter(i => !i.anywhere && i.lat != null).map(i => [i.lat, i.lng]);
   planLine.setLatLngs(pts.length > 1 ? pts : []);
   declutter();
+  renderOsm();
+  // Where we're staying.
+  if (homeMarker) { homeMarker.remove(); homeMarker = null; }
+  if (state.lodging) {
+    homeMarker = L.marker([state.lodging.lat, state.lodging.lng], {
+      icon: L.divIcon({ className: 'pin-wrap', html: '<div class="car-pin home-pin">\uD83C\uDFE0</div>', iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
+      zIndexOffset: 850, title: state.lodging.name,
+    }).bindPopup(() => `<h4>\uD83C\uDFE0 ${esc(state.lodging.name || 'Where we\u2019re staying')}</h4>
+      ${state.lodging.addr ? `<div class="small muted">${esc(state.lodging.addr)}</div>` : ''}
+      <div class="btns">${dirLink('home', 'Directions', 'btn small primary', fix && walkMinutes(fix, state.lodging, pace()) > 20 ? 'drive' : 'walk')}
+      <button class="btn small" data-act="lodging">Change</button></div>`).addTo(map);
+  }
   // The car.
   if (state.parking) {
     const ll = [state.parking.lat, state.parking.lng];
@@ -365,7 +523,26 @@ function declutter() {
   const hide = plan.items.length > 2 && map.getZoom() < 17;
   map.getContainer().classList.toggle('declutter', hide);
 }
-map.on('zoomend', declutter);
+
+let osmDrawnKey = '';
+function renderOsm() {
+  const z = map.getZoom();
+  const layers = state.settings.layers;
+  const used = new Set(state.custom.map(c => c.id));
+  const key = [z, JSON.stringify(layers), used.size, osmPlaces.length].join('|');
+  if (key === osmDrawnKey) return;
+  osmDrawnKey = key;
+  osmLayer.clearLayers();
+  for (const p of osmPlaces) {
+    if (!layers[p.cat] || used.has(p.id) || z < (OSM_MIN_ZOOM[p.cat] || 16)) continue;
+    L.circleMarker([p.lat, p.lng], {
+      renderer: osmRenderer, radius: z >= 17 ? 7 : 5.5, weight: 1.5, color: '#f4eadb',
+      fillColor: CATEGORIES[p.cat].color, fillOpacity: .95,
+    }).bindPopup(() => popupHtml(p.id), { maxWidth: 290, autoPanPaddingTopLeft: [10, 70] }).addTo(osmLayer);
+  }
+  if (!map.hasLayer(osmLayer)) osmLayer.addTo(map);
+}
+map.on('zoomend', () => { declutter(); renderOsm(); });
 
 function popupHtml(id) {
   const p = getPlace(id);
@@ -377,10 +554,12 @@ function popupHtml(id) {
   const dist = fix ? `<div class="small muted">${fmtDistance(walkMeters(fix, p))} from you · ~${walkMinutes(fix, p, pace())} min walk</div>` : '';
   return `
     <h4>${esc(p.name)}</h4>
-    <div class="small muted">${cat.icon} ${esc(cat.label)}${p.addr ? ` · ${esc(p.addr.replace(/, Salem, MA$/, ''))}` : ''}</div>
+    <div class="small muted">${cat.icon} ${esc(p.sub || cat.label)}${p.addr ? ` · ${esc(p.addr.replace(/, (Salem|Rockport|Gloucester), MA$/, ''))}` : ''}</div>
     ${p.cat !== 'parking' && p.cat !== 'transit' ? `<div class="small">${esc(hoursText(p))}${p.mins ? ` · about ${fmtDuration(p.mins)} here` : ''}</div>` : ''}
+    ${p.osm && p.oh ? `<div class="small muted">Listed hours: ${esc(p.oh)}</div>` : ''}
     ${sched}${dist}
     ${p.tip ? `<div class="small" style="margin-top:6px">${esc(p.tip)}</div>` : ''}
+    ${p.web || p.phone ? `<div class="small" style="margin-top:4px">${p.web ? `<a href="${esc(/^https?:/.test(p.web) ? p.web : 'https://' + p.web)}" target="_blank" rel="noopener">Website</a>` : ''}${p.web && p.phone ? ' · ' : ''}${p.phone ? `<a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a>` : ''}</div>` : ''}
     <div class="btns">
       ${p.cat === 'parking' ? `<button class="btn small primary" data-act="park-at" data-id="${id}">🚗 We parked here</button>`
         : stop ? `<button class="btn small" data-act="toggle-stop" data-id="${id}">Remove from plan</button>
@@ -389,7 +568,7 @@ function popupHtml(id) {
       ${dirLink(id)}
       <button class="btn small" data-act="route-to" data-id="${id}">Show route</button>
       ${p.cat !== 'parking' ? `<button class="btn small" data-act="appt-at" data-id="${id}">⏰ Set a time</button>` : ''}
-      ${p.cat === 'custom' ? `<button class="btn small danger" data-act="del-custom" data-id="${id}">Delete</button>` : ''}
+      ${p.cat === 'custom' && !p.osm ? `<button class="btn small danger" data-act="del-custom" data-id="${id}">Delete</button>` : ''}
     </div>`;
 }
 
@@ -415,8 +594,8 @@ function carPopupHtml() {
 
 function fitPlan() {
   const pts = plan.items.filter(i => !i.anywhere && i.lat != null).map(i => [i.lat, i.lng]);
-  if (fix) pts.push([fix.lat, fix.lng]);
-  if (pts.length < 2) { map.setView(pts[0] || SALEM_CENTER, 16); return; }
+  if (fix && pts.length && walkMeters(fix, { lat: pts[0][0], lng: pts[0][1] }) < 8000) pts.push([fix.lat, fix.lng]);
+  if (pts.length < 2) { map.setView(pts[0] || town().center, 16); return; }
   map.fitBounds(pts, { paddingTopLeft: [30, 80], paddingBottomRight: [70, sheetPx() + 20], maxZoom: 17 });
 }
 
@@ -429,6 +608,7 @@ map.on('contextmenu', e => {
     <div class="btns">
       <button class="btn small primary" data-act="custom-here" data-lat="${lat}" data-lng="${lng}">📍 Add a place here</button>
       <button class="btn small" data-act="park-pin" data-lat="${lat}" data-lng="${lng}">🚗 We parked here</button>
+      <button class="btn small" data-act="lodging-pin" data-lat="${lat}" data-lng="${lng}">🏠 We're staying here</button>
     </div>`).openOn(map);
 });
 
@@ -631,12 +811,32 @@ function setSheet(name) {
 
 // --------------------------------------------------------------- panes ----
 
+const TOWN_ICON = { rockport: '⚓', salem: '🧙', gloucester: '🐋' };
+
 function renderChips() {
   const { sunset } = sun();
   const n = nowInfo();
-  const days = daysBetween(n.dateStr, state.tripDate);
-  const when = isTripDay() ? `Now ${fmtTime(n.minutes)}` : days > 0 ? `${fmtDate(state.tripDate)} · in ${days} day${days === 1 ? '' : 's'}` : fmtDate(state.tripDate);
+  const days = daysBetween(n.dateStr, state.day);
+  const where = town().name;
+  const when = isTripDay() ? `Now ${fmtTime(n.minutes)} · ${where}`
+    : `${dayLabel(state.day)} · ${where}${days > 0 ? ` · in ${days} day${days === 1 ? '' : 's'}` : ''}`;
   $('#chips').innerHTML = `<span class="chip">${esc(when)}</span><span class="chip">🌘 Dark at ${fmtTime(sunset)}</span>`;
+}
+
+function renderDayStrip() {
+  const today = nowInfo().dateStr;
+  const el = $('#daystrip');
+  el.hidden = ui.tab === 'more';
+  el.innerHTML = datesBetween(state.trip.start, state.trip.end).map(d => {
+    const day = state.days[d];
+    const t = TOWNS[day.town] || TOWNS.rockport;
+    const count = day.stops.length + day.appts.length;
+    return `<button class="daychip" data-act="pick-day" data-day="${d}" aria-pressed="${d === state.day}">
+      <span class="dc-date">${esc(dayLabel(d))}${d === today ? ' •' : ''}</span>
+      <span class="dc-town">${TOWN_ICON[day.town] || ''} ${esc(t.name)}${count ? ` · ${count}` : ''}</span>
+    </button>`;
+  }).join('');
+  el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 function tl(item, opts = {}) {
@@ -649,6 +849,7 @@ function tl(item, opts = {}) {
   if (done) sub.push('<span class="pill done">Done</span>');
   sub.push(`<span>${fmtDuration(item.depart - item.begin)}</span>`);
   if (p?.tickets) sub.push('<span>🎟️ book ahead</span>');
+  if (p?.hoursUnknown) sub.push('<span>hours not listed</span>');
   return `
     <li class="tl-item ${done ? 'is-done' : ''}">
       <div class="tl-time">${fmtTime(item.begin)}<small>to ${fmtTime(item.depart)}</small></div>
@@ -665,17 +866,66 @@ function tl(item, opts = {}) {
     </li>`;
 }
 
-function leg(item, prevName) {
+function backKey() { return plan.base.car ? 'car' : plan.base.home && state.lodging ? 'home' : 'base'; }
+
+function leg(item) {
   if (item.anywhere) return '';
   const free = item.wait >= 15 ? `<span class="tl-free">🦇 ${fmtDuration(item.wait)} to wander${item.type === 'appt' ? ' before this' : ''}</span>` : '';
-  const walk = item.walk > 0 ? `🚶 ${item.walk} min · ${fmtDistance(item.dist)}` : '🚶 Right here';
-  const key = item.type === 'end' ? (plan.base.car ? 'car' : 'base') : item.key;
+  const how = item.by === 'drive' ? `🚗 ${item.walk} min drive` : `🚶 ${item.walk} min`;
+  const walk = item.walk > 0 ? `${how} · ${fmtDistance(item.dist)}` : '🚶 Right here';
+  const key = item.type === 'end' ? backKey() : item.key;
   return `
     <li class="tl-leg">
       <div class="tl-time small muted">${item.type === 'appt' && item.walk > 0 ? `leave ${fmtTime(item.leaveBy)}` : ''}</div>
       <div class="line"></div>
-      <div class="walk">${walk} ${item.walk > 0 ? dirLink(key, 'Go', 'btn small') : ''} ${free}</div>
+      <div class="walk">${walk} ${item.walk > 0 ? dirLink(key, 'Go', 'btn small', item.by) : ''} ${free}</div>
     </li>`;
+}
+
+function daySettingsHtml() {
+  const s = state.settings;
+  const startOpts = `<option value="lodging" ${s.startFrom === 'lodging' ? 'selected' : ''}>🏠 Where we're staying</option>
+    <option value="parking" ${s.startFrom === 'parking' ? 'selected' : ''}>🚗 Where we park</option>${placeOptions(s.startFrom)}`;
+  return `<details class="edit daysettings" ${ui.openDay ? 'open' : ''}>
+    <summary>⚙️ ${esc(town().name)} · ${fmtTime(toMin(s.dayStart))}–${fmtTime(toMin(s.dayEnd))} · ${s.mode === 'mixed' ? 'walk + drive' : 'walking'} (change)</summary>
+    <div class="grid2" style="margin-top:8px">
+      <label class="field"><span>Where</span><select data-bind="settings.town">
+        ${Object.entries(TOWNS).map(([k, t]) => `<option value="${k}" ${s.town === k ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}
+      </select></label>
+      <label class="field"><span>Getting around</span><select data-bind="settings.mode">
+        <option value="walk" ${s.mode !== 'mixed' ? 'selected' : ''}>Walking</option>
+        <option value="mixed" ${s.mode === 'mixed' ? 'selected' : ''}>Walk, drive far ones</option>
+      </select></label>
+      <label class="field"><span>Day starts</span><input type="time" data-bind="settings.dayStart" value="${esc(s.dayStart)}"></label>
+      <label class="field"><span>Day ends</span><input type="time" data-bind="settings.dayEnd" value="${esc(s.dayEnd)}"></label>
+    </div>
+    <label class="field"><span>Start the day from</span><select data-bind="settings.startFrom">${startOpts}</select></label>
+    <label class="check"><input type="checkbox" data-bind="settings.endAtStart" ${s.endAtStart ? 'checked' : ''}> Finish the day back where we started</label>
+  </details>`;
+}
+
+function lodgingPromptHtml() {
+  return `<div class="card warn"><div class="eyebrow">🏠 Where are you staying?</div>
+    <p class="small" style="margin:4px 0 0">Rockport days start and end there. Until then, the plan starts from Dock Square.</p>
+    <div class="btns"><button class="btn primary" data-act="lodging">Find it</button>
+    <button class="btn" data-act="lodging-pick">Pick on map</button>
+    <button class="btn ghost" data-act="lodging-here">I'm there now</button></div></div>`;
+}
+
+// For a day trip by car (like Salem), when to leave where we're staying.
+function driveHintHtml() {
+  if (plan.live || !plan.base.car) return '';
+  const from = state.lodging || { lat: TOWNS.rockport.center[0], lng: TOWNS.rockport.center[1], name: 'Rockport' };
+  const meters = haversine(from, plan.base);
+  if (meters < 5000) return '';
+  const mins = Math.round(meters * 1.35 / 800) + 10;
+  const startAt = toMin(state.settings.dayStart);
+  const fromName = state.lodging ? 'where you’re staying' : 'Rockport';
+  const back = plan.items[plan.items.length - 1];
+  return `<div class="card"><div class="eyebrow">🚗 Getting here</div>
+    <div>Leave ${fromName} by <b>${fmtTime(startAt - mins)}</b> to park by ${fmtTime(startAt)}.</div>
+    <div class="small muted">About ${mins} min including parking. ${back.type === 'end' ? `Back ${state.lodging ? 'home' : 'in Rockport'} around ${fmtTime(back.arrive + mins)}.` : ''}</div>
+    <div class="btns">${dirLink('base', 'Driving directions', 'btn small', 'drive')}</div></div>`;
 }
 
 function renderToday() {
@@ -684,6 +934,7 @@ function renderToday() {
   const items = plan.items;
   const stopsCount = items.filter(i => i.type === 'stop' || i.type === 'appt').length;
   const empty = !state.stops.length && !state.appts.length && !state.breaks.length;
+  const s = state.settings;
   let html = '';
 
   if (trip) {
@@ -697,13 +948,13 @@ function renderToday() {
         <div class="small">${fmtTime(nxt.begin)}–${fmtTime(nxt.depart)}${!nxt.anywhere && fix ? ` · ${walkMinutes(fix, nxt, pace())} min walk from you` : ''}</div>
         ${late ? '<div class="warnline">You may be running late.</div>' : ''}
         <div class="btns">
-          ${nxt.anywhere ? '' : dirLink(nxt.key, 'Directions', 'btn primary')}
+          ${nxt.anywhere ? '' : dirLink(nxt.key, 'Directions', 'btn primary', nxt.by)}
           ${nxt.anywhere ? '' : `<button class="btn" data-act="route-to" data-id="${esc(nxt.key)}">Show route</button>`}
           <button class="btn" data-act="done" data-id="${esc(nxt.key)}">✓ Done</button>
         </div></div>`;
     } else if (stopsCount) {
-      html += `<div class="card good"><div class="big">You survived Salem 🎃</div><p class="small">That's everything on the list.</p>
-        <div class="btns">${dirLink(plan.base.car ? 'car' : 'base', plan.base.car ? 'Walk to car' : 'Directions back', 'btn primary')}</div></div>`;
+      html += `<div class="card good"><div class="big">${s.town === 'salem' ? 'You survived Salem 🎃' : 'That’s the day 🎃'}</div><p class="small">That's everything on the list.</p>
+        <div class="btns">${dirLink(backKey(), plan.base.car ? 'Walk to car' : 'Directions back', 'btn primary', plan.items[plan.items.length - 1].by)}</div></div>`;
     }
     if (appt && (!nxt || appt.key !== nxt.key)) {
       const leaveIn = appt.leaveBy - n.minutes;
@@ -725,46 +976,55 @@ function renderToday() {
       </div>`;
     }
   } else {
-    const days = daysBetween(n.dateStr, state.tripDate);
-    html += `<h2>${days > 0 ? `${days} night${days === 1 ? '' : 's'} until Salem` : 'The haunting begins'}</h2>
-      <p class="muted small">${fmtDate(state.tripDate)} · ${fmtTime(toMin(state.settings.dayStart))} to ${fmtTime(toMin(state.settings.dayEnd))}. Sunset is at ${fmtTime(sun().sunset)}.${clockChangeNote()}</p>`;
+    const days = daysBetween(n.dateStr, state.day);
+    const title = s.town === 'salem' && days > 0 ? `${days} night${days === 1 ? '' : 's'} until Salem` : `${town().name}, ${dayLabel(state.day)}`;
+    html += `<h2>${esc(title)}</h2>
+      <p class="muted small">${fmtDate(state.day)} · ${fmtTime(toMin(s.dayStart))} to ${fmtTime(toMin(s.dayEnd))}. Sunset is at ${fmtTime(sun().sunset)}.${clockChangeNote()}</p>`;
   }
+  html += daySettingsHtml();
+  if (s.startFrom === 'lodging' && !state.lodging) html += lodgingPromptHtml();
 
   if (empty) {
+    const sample = s.town === 'salem' || s.town === 'rockport';
     html += `<div class="empty card">
-      <div class="big">Plan your haunting</div>
-      <p>Pick places in <b>Places</b> (or tap pins on the map). Add anything with a set time, like a tour or a dinner booking, in <b>Times</b>. The plan builds itself around them.</p>
+      <div class="big">${s.town === 'salem' ? 'Plan your haunting' : `Plan ${esc(dayLabel(state.day))}`}</div>
+      <p>Pick places in <b>Places</b> (or tap pins and dots on the map). Add anything with a set time, like the whale watch, a tour or a dinner booking, in <b>Times</b>. The plan builds itself around them.</p>
       <div class="btns" style="justify-content:center">
         <button class="btn primary" data-act="tab" data-tab="places">Pick places</button>
         <button class="btn" data-act="tab" data-tab="times">Add a fixed time</button>
-        <button class="btn ghost" data-act="sample">Load a sample day</button>
+        ${sample ? `<button class="btn ghost" data-act="sample">Load a sample ${esc(town().name)} day</button>` : ''}
       </div></div>`;
     return html;
   }
 
-  if (plan.base.assumed && !plan.live) {
-    html += `<div class="card small">Starting from <b>Museum Place Garage</b> for now. Tap <b>🚗 Parked here</b> when you arrive and the plan will start from your car.</div>`;
+  html += driveHintHtml();
+  if (plan.base.assumed === 'parking' && !plan.live) {
+    html += `<div class="card small">Starting from <b>${esc(plan.base.garage || town().name)}</b> for now. Tap <b>🚗 Parked here</b> when you arrive and the plan will start from your car.</div>`;
   }
 
   const t = plan.totals;
   html += `<div class="row small muted" style="margin-bottom:8px">
-      <span class="grow">${t.stops} stop${t.stops === 1 ? '' : 's'} · ${fmtDistance(t.walkMeters)} on foot (~${fmtDuration(t.walkMin)})</span>
+      <span class="grow">${t.stops} stop${t.stops === 1 ? '' : 's'} · ~${fmtDuration(t.walkMin)} getting around</span>
       <span>${plan.items[plan.items.length - 1].type === 'end' ? `back ${fmtTime(t.finish)}` : `done ${fmtTime(t.finish)}`}</span>
     </div>`;
+  if (plan.earlyFor) {
+    html += `<p class="small muted">Starting before ${fmtTime(toMin(s.dayStart))} to get to ${esc(plan.earlyFor)} on time.</p>`;
+  }
   if (plan.live && state.done.length) {
     html += `<p class="small muted">✓ ${state.done.length} done already. Re-planned at ${fmtTime(toMin(state.replan.time))}.</p>`;
   }
 
   html += '<ul class="timeline">';
   const start = items[0];
+  const baseIcon = plan.base.car ? '🚗' : plan.base.home ? '🏠' : '🏁';
   html += `<li class="tl-item"><div class="tl-time">${fmtTime(start.depart)}</div>
-    <div class="tl-dot" style="--c:#1f5fa8">${plan.live ? '📍' : plan.base.car ? '🚗' : '🏁'}</div>
+    <div class="tl-dot" style="--c:#1f5fa8">${plan.live ? '📍' : baseIcon}</div>
     <div class="tl-body"><b>${plan.live ? 'Start from where you are' : `Start at ${esc(start.name)}`}</b></div></li>`;
   for (const it of items.slice(1)) {
     html += leg(it);
     if (it.type === 'end') {
       html += `<li class="tl-item"><div class="tl-time">${fmtTime(it.arrive)}</div>
-        <div class="tl-dot" style="--c:#1f5fa8">${plan.base.car ? '🚗' : '🏁'}</div>
+        <div class="tl-dot" style="--c:#1f5fa8">${baseIcon}</div>
         <div class="tl-body"><b>Back at ${esc(plan.base.car ? 'the car' : it.name)}</b>
         ${it.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}</div></li>`;
     } else {
@@ -776,16 +1036,16 @@ function renderToday() {
   if (plan.unscheduled.length) {
     html += `<h3>Lost in the fog (didn't fit)</h3><ul class="list">${plan.unscheduled.map(u => `
       <li><div class="grow"><div class="li-title">${esc(u.name)}</div><div class="small muted" style="white-space:normal">${esc(u.reason)}</div></div>
-      ${state.stops.some(s => s.id === u.key && s.priority !== 'must') ? `<button class="btn small" data-act="toggle-must" data-id="${esc(u.key)}">★ Must-see</button>` : ''}
+      ${state.stops.some(x => x.id === u.key && x.priority !== 'must') ? `<button class="btn small" data-act="toggle-must" data-id="${esc(u.key)}">★ Must-see</button>` : ''}
       </li>`).join('')}</ul>`;
   }
 
   html += `<div class="btns" style="margin-top:16px">
-    <button class="btn" data-act="ics">📅 Add to calendar</button>
+    <button class="btn" data-act="ics">📅 Add trip to calendar</button>
     <button class="btn" data-act="share-plan">🔗 Share plan</button>
     <button class="btn ghost" data-act="fit">Show on map</button>
   </div>
-  <p class="small muted" style="margin-top:10px">Hours are typical for early November. Check anything important before you go. Walking times assume a ${state.settings.pace} pace plus ${state.settings.buffer} min per stop for getting in and out.</p>`;
+  <p class="small muted" style="margin-top:10px">Hours are typical for this time of year. Check anything important before you go. Walking assumes a ${s.pace} pace plus ${s.buffer} min per stop${s.mode === 'mixed' ? '; drives include about 8 min to park' : ''}.</p>`;
   return html;
 }
 
@@ -796,50 +1056,82 @@ function clockChangeNote() {
   return b < a ? ' Clocks fall back an hour at 2 AM that morning. Phones change on their own.' : ' Clocks spring forward an hour at 2 AM that morning.';
 }
 
+// ---- Places: every hand-picked place, our own, and everything from OpenStreetMap.
+
+function listCandidates() {
+  const used = new Set(state.custom.map(c => c.id));
+  return [...allPlaces(), ...osmPlaces.filter(p => !used.has(p.id)).map(p => getPlace(p.id))];
+}
+
+function placesListHtml() {
+  const q = ui.q.trim().toLowerCase();
+  const center = townLatLng();
+  const from = fix && walkMeters(fix, center) < 15000 ? fix : center;
+  let list = listCandidates().filter(p => ui.cat === 'all' ? true : ui.cat === 'plan' ? inPlan(p.id) : p.cat === ui.cat);
+  if (q) {
+    list = list.filter(p => `${p.name} ${p.sub || ''} ${p.addr || ''} ${CATEGORIES[p.cat]?.label || ''}`.toLowerCase().includes(q));
+  } else if (ui.cat !== 'plan') {
+    list = list.filter(p => walkMeters(center, p) < 15000); // around today's town
+  }
+  const rank = p => (inPlan(p.id) ? 0 : p.osm || osmMap.has(p.id) ? 2 : 1);
+  const dist = new Map(list.map(p => [p.id, walkMeters(from, p)]));
+  list.sort((a, b) => rank(a) - rank(b) || dist.get(a.id) - dist.get(b.id));
+  const total = list.length;
+  list = list.slice(0, 60);
+  let html = `<ul class="list">${list.map(p => {
+    const c = CATEGORIES[p.cat] || CATEGORIES.custom;
+    const st = state.stops.find(x => x.id === p.id);
+    const it = plan.order.get(p.id);
+    const canPlan = p.cat !== 'parking' && p.cat !== 'transit';
+    const editable = st && (placeMap.has(p.id) || state.custom.some(x => x.id === p.id));
+    const subline = canPlan
+      ? [p.sub, hoursText(p), p.mins ? fmtDuration(p.mins) : '', fmtDistance(dist.get(p.id))].filter(Boolean).join(' · ')
+      : [p.sub || p.tip || p.addr, fmtDistance(dist.get(p.id))].filter(Boolean).join(' · ');
+    return `<li style="flex-wrap:wrap">
+      <div class="ico" style="color:${c.color}">${it?.n ? `<b>${it.n}</b>` : c.icon}</div>
+      <button class="li-main" data-act="focus" data-id="${p.id}">
+        <div class="li-title">${esc(p.name)}${placeMap.has(p.id) ? ' <span class="pick">★</span>' : ''}</div>
+        <div class="li-sub">${esc(subline)}${p.tickets ? ' · 🎟️' : ''}</div>
+      </button>
+      ${canPlan ? `<button class="btn small toggle-add ${st ? 'on' : ''}" data-act="toggle-stop" data-id="${p.id}">${st ? '✓ Added' : '+ Add'}</button>`
+        : p.cat === 'parking' ? `<button class="btn small" data-act="park-at" data-id="${p.id}">Parked here</button>` : ''}
+      ${st ? `<div style="flex-basis:100%;padding-left:44px" class="row wrap">
+        <button class="btn small ${st.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${p.id}">★ ${st.priority === 'must' ? 'Must-see' : 'Make must-see'}</button>
+        ${editable ? editPlaceForm(p) : ''}
+      </div>` : ''}
+    </li>`;
+  }).join('')}</ul>`;
+  if (!total) {
+    html += ui.cat === 'plan' && !q ? '<p class="muted">Nothing in the plan yet. Tap + Add on any place.</p>'
+      : `<p class="muted">No matches${q ? ` for “${esc(ui.q)}”` : ''}.</p>`;
+  } else if (total > list.length) {
+    html += `<p class="small muted">Showing the closest ${list.length} of ${total}. Type to search them all.</p>`;
+  }
+  if (q) html += `<button class="btn small ghost" data-act="online-search">🌐 Search the web map for “${esc(ui.q)}”</button>`;
+  return html;
+}
+
 function renderPlaces() {
-  const cats = Object.entries(CATEGORIES).filter(([k]) => k !== 'custom' || state.custom.length);
-  const list = allPlaces().filter(p => ui.cat === 'all' ? true : ui.cat === 'plan' ? inPlan(p.id) : p.cat === ui.cat);
+  const cats = Object.entries(CATEGORIES).filter(([k]) => k !== 'custom' || state.custom.some(c => c.cat === 'custom'));
   let html = `
-    <form class="searchbar" data-form="search">
-      <input type="search" name="q" placeholder="Search Salem: a restaurant, shop, address…" enterkeyhint="search" autocomplete="off">
-      <button class="btn" type="submit">${ui.searching ? '…' : 'Search'}</button>
-    </form>`;
+    <div class="searchbar">
+      <input type="search" id="place-q" value="${esc(ui.q)}" placeholder="Search ${osmPlaces.length + PLACES.length} places: name, type, street…" enterkeyhint="search" autocomplete="off">
+    </div>`;
   if (ui.results) {
-    html += `<div class="card"><div class="row"><b class="grow">Search results</b><button class="btn small ghost" data-act="clear-search">Clear</button></div>
-      ${ui.results.length ? `<ul class="list">${ui.results.map((r, i) => `
+    html += `<div class="card"><div class="row"><b class="grow">From the web map</b><button class="btn small ghost" data-act="clear-search">Clear</button></div>
+      ${ui.searching ? '<p class="small muted">Searching…</p>' : ui.results.length ? `<ul class="list">${ui.results.map((r, i) => `
         <li><div class="grow"><div class="li-title">${esc(r.name)}</div><div class="li-sub">${esc(r.addr)}</div></div>
         <button class="btn small primary" data-act="add-result" data-i="${i}">+ Add</button></li>`).join('')}</ul>`
-        : '<p class="small muted">Nothing found near Salem. Try another name, or press and hold on the map to drop a pin.</p>'}
+        : '<p class="small muted">Nothing found nearby. Try another name, or press and hold on the map to drop a pin.</p>'}
     </div>`;
   }
   html += `<div class="chiprow">
     <button class="fchip" data-act="cat" data-cat="all" aria-pressed="${ui.cat === 'all'}">All</button>
     <button class="fchip" data-act="cat" data-cat="plan" aria-pressed="${ui.cat === 'plan'}">✓ In plan (${state.stops.length})</button>
     ${cats.map(([k, c]) => `<button class="fchip" data-act="cat" data-cat="${k}" aria-pressed="${ui.cat === k}">${c.icon} ${esc(c.label)}</button>`).join('')}
-  </div>`;
-  if (!list.length) {
-    html += `<p class="muted">${ui.cat === 'plan' ? 'Nothing in the plan yet. Tap + Add on any place.' : 'No places here yet.'}</p>`;
-  }
-  html += `<ul class="list">${list.map(p => {
-    const c = CATEGORIES[p.cat] || CATEGORIES.custom;
-    const s = state.stops.find(x => x.id === p.id);
-    const it = plan.order.get(p.id);
-    const canPlan = p.cat !== 'parking' && p.cat !== 'transit';
-    return `<li style="flex-wrap:wrap">
-      <div class="ico" style="color:${c.color}">${it ? `<b>${it.n}</b>` : c.icon}</div>
-      <button class="li-main" data-act="focus" data-id="${p.id}">
-        <div class="li-title">${esc(p.name)}</div>
-        <div class="li-sub">${canPlan ? `${esc(hoursText(p))}${p.mins ? ` · ${fmtDuration(p.mins)}` : ''}` : esc(p.tip || p.addr)}${p.tickets ? ' · 🎟️' : ''}</div>
-      </button>
-      ${canPlan ? `<button class="btn small toggle-add ${s ? 'on' : ''}" data-act="toggle-stop" data-id="${p.id}">${s ? '✓ Added' : '+ Add'}</button>` :
-        p.cat === 'parking' ? `<button class="btn small" data-act="park-at" data-id="${p.id}">Parked here</button>` : ''}
-      ${s ? `<div style="flex-basis:100%;padding-left:44px" class="row wrap">
-        <button class="btn small ${s.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${p.id}">★ ${s.priority === 'must' ? 'Must-see' : 'Make must-see'}</button>
-        ${editPlaceForm(p)}
-      </div>` : ''}
-    </li>`;
-  }).join('')}</ul>
-  <p class="small muted" style="margin-top:12px">Tip: press and hold anywhere on the map to add your own place, like your hotel or a shop you spotted.</p>`;
+  </div>
+  <div id="places-list">${placesListHtml()}</div>
+  <p class="small muted" style="margin-top:12px">★ = our picks. Everything else comes from OpenStreetMap${osmFetched ? ` (updated ${esc(osmFetched)})` : ''}. Press and hold on the map to add a place of your own.</p>`;
   return html;
 }
 
@@ -851,14 +1143,19 @@ function editPlaceForm(p) {
       <label class="field"><span>Opens</span><input type="time" value="${esc(p.open || '')}" data-edit="open" data-id="${p.id}"></label>
       <label class="field"><span>Closes</span><input type="time" value="${esc(p.close || '')}" data-edit="close" data-id="${p.id}"></label>
     </div>
-    <div class="small muted">Leave both times blank if it's always open.</div>
+    <div class="small muted">Hours for ${esc(dayLabel(state.day))}. Leave both blank if it's always open.</div>
     ${state.edits[p.id] ? `<button class="btn small ghost" data-act="reset-edit" data-id="${p.id}">Reset to defaults</button>` : ''}
   </details>`;
 }
 
+// Choices for "where" menus: places near today's town, plus anything selected.
 function placeOptions(selected) {
+  const center = townLatLng();
   const groups = {};
-  for (const p of allPlaces()) (groups[p.cat] ||= []).push(p);
+  for (const p of allPlaces()) {
+    if (p.id !== selected && walkMeters(center, p) > 20000) continue;
+    (groups[p.cat] ||= []).push(p);
+  }
   return Object.entries(groups).map(([cat, ps]) => `<optgroup label="${esc(CATEGORIES[cat]?.label || cat)}">${
     ps.map(p => `<option value="${p.id}" ${p.id === selected ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</optgroup>`).join('');
 }
@@ -866,7 +1163,7 @@ function placeOptions(selected) {
 function renderTimes() {
   const appts = state.appts.slice().sort((a, b) => toMin(a.time) - toMin(b.time));
   let html = `<h2>Fixed times</h2>
-    <p class="small muted">Anything you have to be at on time: tours, timed tickets, dinner bookings, the train home. The plan fits everything else around these.</p>`;
+    <p class="small muted">Anything you have to be at on time on ${esc(dayLabel(state.day))}: the whale watch, tours, timed tickets, dinner bookings. The plan fits everything else around these.</p>`;
   if (appts.length) {
     html += `<ul class="list">${appts.map(a => {
       const p = a.placeId ? getPlace(a.placeId) : null;
@@ -879,15 +1176,15 @@ function renderTimes() {
         </button>
         <button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">✕</button>
         ${it?.warnings.length ? `<div style="flex-basis:100%;padding-left:44px">${it.warnings.map(w => `<div class="warnline">⚠️ ${esc(w)}</div>`).join('')}</div>` : ''}
-        ${it && it.walk ? `<div style="flex-basis:100%;padding-left:44px" class="small muted">Leave by ${fmtTime(it.leaveBy)} · ${it.walk} min walk from the stop before</div>` : ''}
+        ${it && it.walk ? `<div style="flex-basis:100%;padding-left:44px" class="small muted">Leave by ${fmtTime(it.leaveBy)} · ${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'} from the stop before</div>` : ''}
         ${a.note ? `<div style="flex-basis:100%;padding-left:44px" class="small">${esc(a.note)}</div>` : ''}
       </li>`;
     }).join('')}</ul>`;
   }
   const pre = ui.apptDraft || {};
   html += `<div class="card" style="margin-top:12px"><form data-form="appt">
-    <div class="eyebrow">Add a fixed time</div>
-    <label class="field"><span>What</span><input type="text" name="title" placeholder="Ghost tour, dinner at Turner's, train home…" value="${esc(pre.title || '')}" required></label>
+    <div class="eyebrow">Add a fixed time for ${esc(dayLabel(state.day))}</div>
+    <label class="field"><span>What</span><input type="text" name="title" placeholder="Whale watch, Hammond Castle tour, dinner…" value="${esc(pre.title || '')}" required></label>
     <div class="grid2">
       <label class="field"><span>Starts at</span><input type="time" name="time" value="${esc(pre.time || '19:00')}" required></label>
       <label class="field"><span>Lasts (min)</span><input type="number" name="mins" min="0" step="5" value="${esc(pre.mins ?? 60)}"></label>
@@ -899,10 +1196,11 @@ function renderTimes() {
     </select></label>
     <label class="field"><span>Note (optional)</span><input type="text" name="note" placeholder="Confirmation #, meet at the door…" value="${esc(pre.note || '')}"></label>
     <button class="btn primary block" type="submit">Add fixed time</button>
-  </form></div>`;
+  </form>
+  <p class="small muted" style="margin:8px 0 0">Doing it on another day? Pick that day at the top first.</p></div>`;
 
   html += `<h3>Meals &amp; breaks</h3>
-    <p class="small muted">A break happens wherever you are when it's time, so there's no walking to it.</p>`;
+    <p class="small muted">A break happens wherever you are when it's time, so there's no travel to it.</p>`;
   if (state.breaks.length) {
     html += `<ul class="list">${state.breaks.map(b => {
       const it = plan.order.get(b.id);
@@ -927,7 +1225,7 @@ function renderTimes() {
 
 function renderCar() {
   const p = state.parking;
-  let html = '<h2>Where we parked</h2>';
+  let html = `<h2>Where we parked</h2><p class="small muted" style="margin-top:-6px">${esc(dayLabel(state.day))} · ${esc(town().name)}</p>`;
   if (p) {
     const away = fix ? walkMeters(fix, p) : null;
     let photo = null;
@@ -962,63 +1260,89 @@ function renderCar() {
       <button class="btn primary block" data-act="park-here">🚗 We parked here (use my location)</button>
       <div class="btns"><button class="btn" data-act="park-pick">Pick the spot on the map</button></div>`;
   }
-  html += `<h3>Parking garages</h3><ul class="list">${PLACES.filter(x => x.cat === 'parking').map(g => `
-    <li><div class="ico">🅿️</div><button class="li-main" data-act="focus" data-id="${g.id}"><div class="li-title">${esc(g.name)}</div><div class="li-sub">${esc(g.addr.replace(/, Salem, MA$/, ''))}</div></button>
-    <button class="btn small" data-act="park-at" data-id="${g.id}">Parked here</button></li>`).join('')}</ul>
-    <p class="small muted">City garages take card or the Passport Parking app. Rates change, and they're higher on busy weekends.</p>`;
+  // Nearby garages and lots, closest first.
+  const from = fix && walkMeters(fix, townLatLng()) < 15000 ? fix : townLatLng();
+  const lots = [...allPlaces(), ...osmPlaces.map(x => getPlace(x.id))]
+    .filter(x => x.cat === 'parking' && !/customers only/.test(x.sub || ''))
+    .map(x => ({ x, d: walkMeters(from, x) })).filter(o => o.d < 6000)
+    // Garages and named or paid public lots first; little unnamed lots count as farther away.
+    .sort((a, b) => a.d * lotWeight(a.x) - b.d * lotWeight(b.x)).slice(0, 15);
+  html += `<h3>Parking near ${fix && from === fix ? 'you' : esc(town().name)}</h3><ul class="list">${lots.map(({ x, d }) => `
+    <li><div class="ico">🅿️</div><button class="li-main" data-act="focus" data-id="${x.id}"><div class="li-title">${esc(x.name)}</div>
+    <div class="li-sub">${esc([x.sub || x.addr?.replace(/, (Salem|Rockport|Gloucester), MA$/, ''), fmtDistance(d)].filter(Boolean).join(' · '))}</div></button>
+    <button class="btn small" data-act="park-at" data-id="${x.id}">Parked here</button></li>`).join('')}</ul>
+    <p class="small muted">Rates and seasonal rules change. Check the signs where you park.</p>`;
   return html;
+}
+
+function lotWeight(p) {
+  return /garage/i.test(p.name + p.sub) || /paid|spaces/.test(p.sub || '') || !/^Parking( lot)?$/.test(p.name) ? 1 : 2.5;
 }
 
 function renderMore() {
   const s = state.settings;
-  const startOpts = `<option value="parking" ${s.startFrom === 'parking' ? 'selected' : ''}>🚗 Where we parked</option>${placeOptions(s.startFrom)}`;
+  const L_ = s.layers;
   return `<h2>Settings</h2>
-    <label class="field"><span>Trip date</span><input type="date" data-bind="tripDate" value="${esc(state.tripDate)}"></label>
+    <h3>The trip</h3>
     <div class="grid2">
-      <label class="field"><span>Day starts</span><input type="time" data-bind="settings.dayStart" value="${esc(s.dayStart)}"></label>
-      <label class="field"><span>Day ends</span><input type="time" data-bind="settings.dayEnd" value="${esc(s.dayEnd)}"></label>
+      <label class="field"><span>First day</span><input type="date" data-bind="trip.start" value="${esc(state.trip.start)}"></label>
+      <label class="field"><span>Last day</span><input type="date" data-bind="trip.end" value="${esc(state.trip.end)}"></label>
     </div>
-    <label class="field"><span>Start the day from</span><select data-bind="settings.startFrom">${startOpts}</select></label>
-    <label class="check"><input type="checkbox" data-bind="settings.endAtStart" ${s.endAtStart ? 'checked' : ''}> Finish the day back where we started</label>
+    <div class="card"><div class="eyebrow">🏠 Where we're staying</div>
+      ${state.lodging ? `<div><b>${esc(state.lodging.name)}</b></div>${state.lodging.addr ? `<div class="small muted">${esc(state.lodging.addr)}</div>` : ''}` : '<div class="small">Not set yet. Rockport days start and end here.</div>'}
+      <div class="btns"><button class="btn small primary" data-act="lodging">${state.lodging ? 'Change' : 'Find it'}</button>
+      <button class="btn small" data-act="lodging-pick">Pick on map</button>
+      <button class="btn small ghost" data-act="lodging-here">I'm there now</button>
+      ${state.lodging ? '<button class="btn small ghost danger" data-act="lodging-clear">Clear</button>' : ''}</div>
+    </div>
+    <p class="small muted">Each day's town, hours and start point are under the ⚙️ line at the top of the Plan tab.</p>
+
+    <h3>Getting around</h3>
     <div class="grid2">
       <label class="field"><span>Walking pace</span><select data-bind="settings.pace">
         ${['slow', 'normal', 'fast'].map(v => `<option value="${v}" ${s.pace === v ? 'selected' : ''}>${v[0].toUpperCase() + v.slice(1)}</option>`).join('')}
       </select></label>
       <label class="field"><span>Extra min per stop</span><input type="number" min="0" max="30" data-bind="settings.buffer" value="${esc(s.buffer)}"></label>
     </div>
-    <div class="grid2">
-      <label class="field"><span>Open directions in</span><select data-bind="settings.mapsApp">
-        <option value="auto" ${s.mapsApp === 'auto' ? 'selected' : ''}>Automatic</option>
-        <option value="apple" ${s.mapsApp === 'apple' ? 'selected' : ''}>Apple Maps</option>
-        <option value="google" ${s.mapsApp === 'google' ? 'selected' : ''}>Google Maps</option>
-      </select></label>
-      <label class="field"><span>Map style</span><select data-bind="settings.mapLook">
-        <option value="haunted" ${s.mapLook !== 'daylight' ? 'selected' : ''}>🦇 Haunted night</option>
-        <option value="daylight" ${s.mapLook === 'daylight' ? 'selected' : ''}>☀️ Daylight (easier in bright sun)</option>
-      </select></label>
-    </div>
-    <label class="check"><input type="checkbox" data-bind="settings.mapFilter" ${s.mapFilter === 'plan' ? 'checked' : ''}> Only show places in our plan on the map</label>
-    <label class="check"><input type="checkbox" data-bind="settings.practice" ${s.practice ? 'checked' : ''}> Practice mode: treat today as the trip day</label>
+    <label class="field"><span>Open directions in</span><select data-bind="settings.mapsApp">
+      <option value="auto" ${s.mapsApp === 'auto' ? 'selected' : ''}>Automatic</option>
+      <option value="apple" ${s.mapsApp === 'apple' ? 'selected' : ''}>Apple Maps</option>
+      <option value="google" ${s.mapsApp === 'google' ? 'selected' : ''}>Google Maps</option>
+    </select></label>
+
+    <h3>Map</h3>
+    <label class="field"><span>Map style</span><select data-bind="settings.mapLook">
+      <option value="haunted" ${s.mapLook !== 'daylight' ? 'selected' : ''}>🦇 Haunted night</option>
+      <option value="daylight" ${s.mapLook === 'daylight' ? 'selected' : ''}>☀️ Daylight (easier in bright sun)</option>
+    </select></label>
+    ${layerChecks(L_)}
+    <label class="check"><input type="checkbox" data-bind="settings.mapFilter" ${s.mapFilter === 'plan' ? 'checked' : ''}> Hide our hand-picked places that aren't in the plan</label>
+    <label class="check"><input type="checkbox" data-bind="settings.practice" ${s.practice ? 'checked' : ''}> Practice mode: treat today as the picked day</label>
 
     <h3>Share &amp; back up</h3>
-    <p class="small muted">Everything is saved on this phone. Send the plan to whoever you're traveling with, and when they open the link it loads on their phone.</p>
+    <p class="small muted">Everything is saved on this phone. Send the plan to whoever you're traveling with, and when they open the link the whole trip loads on their phone.</p>
     <div class="btns">
       <button class="btn" data-act="share-plan">🔗 Share plan link</button>
-      <button class="btn" data-act="ics">📅 Add to calendar</button>
+      <button class="btn" data-act="ics">📅 Add trip to calendar</button>
     </div>
     <div class="btns">
-      <button class="btn ghost" data-act="sample">Load the sample day</button>
       <button class="btn ghost danger" data-act="reset">Start over</button>
     </div>
 
     <h3>Before you go</h3>
     <ul class="small" style="padding-left:18px;margin:0">
       <li>Add this page to your home screen. In Safari, tap Share, then <b>Add to Home Screen</b>. It opens like an app and works with a weak signal.</li>
-      <li>Open the map once over Wi-Fi and zoom around downtown. The map tiles you've seen are saved for when the signal's bad.</li>
+      <li>Open the map once over Wi-Fi and zoom around Rockport and Salem. The map tiles you've seen are saved for when the signal's bad.</li>
       <li>Allow location when asked. That's how "Parked here" and "Show route" work.</li>
-      <li>Reminders only pop up while the app is open. For alerts you can count on, use <b>Add to calendar</b>.</li>
+      <li>Reminders only pop up while the app is open. For alerts you can count on, use <b>Add trip to calendar</b>.</li>
     </ul>
-    <p class="small muted" style="margin-top:14px">Map data © OpenStreetMap contributors. Walking routes by FOSSGIS/OSRM. Place search by Nominatim.</p>`;
+    <p class="small muted" style="margin-top:14px">Map and place data © OpenStreetMap contributors${osmFetched ? ` (places updated ${esc(osmFetched)})` : ''}. Walking routes by FOSSGIS/OSRM. Place search by Nominatim.</p>`;
+}
+
+function layerChecks(l) {
+  const row = (k, label) => `<label class="check"><input type="checkbox" data-bind="layers.${k}" ${l[k] ? 'checked' : ''}> ${label}</label>`;
+  return `<div class="small muted" style="margin-top:4px">Show on the map when zoomed in:</div>
+    ${row('shop', '🔮 Shops')}${row('food', '🍽️ Restaurants, cafes &amp; bars')}${row('museum', '🏛️ Museums, galleries &amp; sights')}${row('parking', '🅿️ Parking')}`;
 }
 
 const PANES = { today: renderToday, places: renderPlaces, times: renderTimes, car: renderCar, more: renderMore };
@@ -1033,6 +1357,7 @@ function renderPane() {
   el.innerHTML = PANES[ui.tab]();
   el.scrollTop = scroll;
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
+  renderDayStrip();
 }
 
 function refresh() {
@@ -1080,6 +1405,13 @@ function focusOn(id) {
   if (innerWidth < 900) setSheet('peek');
   map.flyTo(ll, Math.max(map.getZoom(), 17));
   if (m) setTimeout(() => m.openPopup(), 400);
+  else if (p) setTimeout(() => L.popup({ maxWidth: 290 }).setLatLng(ll).setContent(popupHtml(id)).openOn(map), 400);
+}
+
+// Is a place used anywhere in the trip (any day's stops, times, start or parking)?
+function placeInUse(s, id) {
+  return Object.values(s.days).some(d => d.stops.some(x => x.id === id) || d.appts.some(a => a.placeId === id) ||
+    d.startFrom === id || d.parking?.placeId === id);
 }
 
 async function parkHere() {
@@ -1106,8 +1438,14 @@ function savePark({ lat, lng, placeId = null }) {
 function toggleStop(id) {
   const had = inPlan(id);
   update(s => {
-    if (had) s.stops = s.stops.filter(x => x.id !== id);
-    else s.stops.push({ id, priority: 'nice' });
+    if (had) {
+      s.stops = s.stops.filter(x => x.id !== id);
+      // Drop our copy of an OpenStreetMap place once nothing uses it.
+      if (osmMap.has(id) && !placeInUse(s, id)) s.custom = s.custom.filter(c => c.id !== id);
+    } else {
+      adopt(s, id);
+      s.stops.push({ id, priority: 'nice' });
+    }
   });
   map.closePopup();
   const p = getPlace(id);
@@ -1128,7 +1466,7 @@ function toggleMust(id) {
 function markDone(key) {
   update(s => { if (!s.done.includes(key)) s.done.push(key); });
   const nxt = nextItem();
-  toast(nxt ? `Next up: ${nxt.name}` : 'All done. You survived! 🎃', { label: 'Undo', run: () => update(s => { s.done = s.done.filter(k => k !== key); }) });
+  toast(nxt ? `Next up: ${nxt.name}` : 'All done for today! \uD83C\uDF83', { label: 'Undo', run: () => update(s => { s.done = s.done.filter(k => k !== key); }) });
 }
 
 function skipStop(key) {
@@ -1154,16 +1492,23 @@ async function replan() {
   if (nxt) toast(`Re-planned. Next: ${nxt.name} at ${fmtTime(nxt.begin)}`);
 }
 
+const SAMPLES = {
+  salem: {
+    stops: [['witch-museum', 'must'], ['burying-point', 'must'], ['trials-memorial'], ['witch-house', 'must'], ['ropes-mansion'],
+      ['bewitched-statue'], ['seven-gables'], ['pepper-co'], ['derby-wharf'], ['kakawa']],
+    appt: { title: 'Dinner at Turner\u2019s (sample)', placeId: 'turners', time: '17:30', mins: 75 },
+  },
+  rockport: {
+    stops: [['motif-1', 'must'], ['bearskin-neck', 'must'], ['halibut-point', 'must'], ['rockport-art'], ['helmuts'], ['front-beach']],
+    appt: { title: 'Lobster at Roy Moore (sample)', placeId: 'roy-moore', time: '17:00', mins: 45 },
+  },
+};
+
 function loadSample() {
+  const sample = SAMPLES[state.settings.town] || SAMPLES.rockport;
   update(s => {
-    s.stops = [
-      { id: 'witch-museum', priority: 'must' }, { id: 'burying-point', priority: 'must' },
-      { id: 'trials-memorial', priority: 'nice' }, { id: 'witch-house', priority: 'must' },
-      { id: 'ropes-mansion', priority: 'nice' }, { id: 'bewitched-statue', priority: 'nice' },
-      { id: 'seven-gables', priority: 'nice' }, { id: 'pepper-co', priority: 'nice' },
-      { id: 'derby-wharf', priority: 'nice' }, { id: 'kakawa', priority: 'nice' },
-    ];
-    s.appts = [{ id: uid('a-'), title: 'Dinner at Turner’s (sample)', placeId: 'turners', time: '17:30', mins: 75, note: 'Example booking. Edit or delete it.' }];
+    s.stops = sample.stops.map(([id, priority = 'nice']) => ({ id, priority }));
+    s.appts = [{ id: uid('a-'), ...sample.appt, note: 'Example. Edit or delete it.' }];
     s.breaks = [{ id: uid('b-'), title: 'Lunch', from: '12:00', to: '13:30', mins: 45 }];
     s.done = [];
     s.replan = null;
@@ -1177,8 +1522,9 @@ function loadSample() {
 // Share links put the whole plan in the URL after "#plan=", so nothing goes
 // to a server. The other phone saves it when the link is opened.
 function encodePlan() {
-  const { tripDate, settings, custom, edits, stops, appts, breaks, parking } = state;
-  const json = JSON.stringify({ v: 1, tripDate, settings: { ...settings, practice: false }, custom, edits, stops, appts, breaks, parking });
+  const copy = JSON.parse(JSON.stringify(state));
+  copy.settings.practice = false;
+  const json = JSON.stringify(copy);
   const bytes = new TextEncoder().encode(json);
   let bin = '';
   bytes.forEach(b => { bin += String.fromCharCode(b); });
@@ -1205,25 +1551,25 @@ async function shareText(title, text, url) {
 
 function downloadICS() {
   const places = Object.fromEntries(allPlaces().map(p => [p.id, p]));
-  for (const a of state.appts) if (a.placeId) places[a.id] = places[a.placeId];
+  for (const d of Object.values(state.days)) for (const a of d.appts) if (a.placeId) places[a.id] = places[a.placeId];
   const ics = buildICS({
-    dateStr: state.tripDate, items: plan.items, places, parking: state.parking,
-    mapsLink: it => dirUrl(targetFor(it.key)),
+    days: allDayPlans(), places,
+    mapsLink: it => dirUrl({ lat: it.lat, lng: it.lng, exact: true }, it.by),
   });
   const blob = new Blob([ics], { type: 'text/calendar' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `salem-${state.tripDate}.ics`;
+  a.download = `salem-trip-${state.trip.start}.ics`;
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-  toast('Calendar file ready. Open it to add the events.');
+  toast('Calendar file ready for the whole trip. Open it to add the events.');
 }
 
 async function search(q) {
   ui.searching = true;
   renderPane();
-  const [[s, w], [n, e]] = SALEM_BOUNDS;
+  const [[s, w], [n, e]] = town().bounds;
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&bounded=1&viewbox=${w},${n},${e},${s}&q=${encodeURIComponent(q)}`;
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
@@ -1304,6 +1650,7 @@ const ACTIONS = {
   'close-route': () => { ui.route = null; renderRouteBar(); },
   'toggle-steps': () => { const s = $('#route-steps'); if (s) s.hidden = !s.hidden; },
   'appt-at': el => {
+    if (osmMap.has(el.dataset.id)) update(s => adopt(s, el.dataset.id));
     const p = getPlace(el.dataset.id);
     ui.apptDraft = { title: p.name, placeId: p.id, time: '19:00', mins: p.mins || 60 };
     map.closePopup();
@@ -1352,20 +1699,40 @@ const ACTIONS = {
   'reset-yes': () => {
     closeModal();
     try { localStorage.removeItem(PHOTO); } catch { /* ignore */ }
-    state = defaults();
+    state = attachDay(ensureDays(defaults()));
     save();
     refresh();
   },
   'share-plan': () => {
     const url = `${location.origin}${location.pathname}#plan=${encodePlan()}`;
-    shareText('Our Salem plan', 'Here’s our Salem day plan:', url);
+    shareText('Our trip plan', 'Here\u2019s our Rockport & Salem trip plan:', url);
   },
+  'pick-day': el => {
+    state.day = el.dataset.day;
+    save();
+    ui.results = null;
+    routeLayer.clearLayers();
+    refresh();
+    if (state.stops.length || state.appts.length) fitPlan(); else map.setView(town().center, 15);
+  },
+  lodging: () => lodgingSearchModal(),
+  'lodging-pick': () => { closeModal(); startPick('Where are you staying?', ll => askLodgingName(ll.lat, ll.lng)); },
+  'lodging-pin': el => { map.closePopup(); askLodgingName(+el.dataset.lat, +el.dataset.lng); },
+  'lodging-here': async () => {
+    try { const f = await currentPosition(); askLodgingName(f.lat, f.lng); } catch { toast('Couldn\u2019t get your location.'); }
+  },
+  'lodging-set': el => {
+    const r = ui.lodgingResults[+el.dataset.i];
+    closeModal();
+    setLodging({ name: r.name, lat: r.lat, lng: r.lng, addr: r.addr });
+  },
+  'lodging-clear': () => update(s => { s.lodging = null; }),
+  'online-search': () => { if (ui.q.trim()) search(ui.q.trim()); },
   ics: () => downloadICS(),
   'import-yes': () => {
     try {
-      const incoming = normalize(decodePlan(ui.pendingImport));
-      incoming.done = [];
-      incoming.replan = null;
+      const incoming = attachDay(normalize(decodePlan(ui.pendingImport)));
+      for (const d of Object.values(incoming.days)) { d.done = []; d.replan = null; }
       state = incoming;
       save();
       closeModal();
@@ -1419,6 +1786,8 @@ document.addEventListener('change', async e => {
     update(s => {
       const cur = { ...(s.edits[id] || {}) };
       cur[field] = field === 'mins' ? Math.max(0, Number(el.value) || 0) : (el.value || null);
+      // Typed-in hours win over listed ones.
+      if (field !== 'mins') Object.assign(cur, { closedDay: false, hoursUnknown: false });
       s.edits[id] = cur;
     });
     return;
@@ -1437,8 +1806,26 @@ document.addEventListener('change', async e => {
   const bind = el.dataset.bind;
   if (!bind) return;
   let v = el.type === 'checkbox' ? el.checked : el.value;
+  if (bind.startsWith('settings.') && DAY_SETTINGS.includes(bind.slice(9))) ui.openDay = true;
   update(s => {
-    if (bind === 'tripDate') { if (v) { s.tripDate = v; s.replan = null; s.done = []; } return; }
+    if (bind === 'trip.start' || bind === 'trip.end') {
+      if (!v) return;
+      const next = { ...s.trip, [bind.slice(5)]: v };
+      if (next.end < next.start || datesBetween(next.start, next.end).length > 20) { toast('Pick a first day before the last day, up to 3 weeks.'); return; }
+      s.trip = next;
+      ensureDays(s);
+      if (s.day < s.trip.start || s.day > s.trip.end) s.day = s.trip.start;
+      return;
+    }
+    if (bind.startsWith('layers.')) { s.settings.layers = { ...s.settings.layers, [bind.slice(7)]: v }; return; }
+    if (bind === 'settings.town') {
+      // Sensible defaults: Salem is a park-and-walk day trip; the others start
+      // from where we're staying and drive the longer hops.
+      s.settings.town = v;
+      s.settings.startFrom = v === 'salem' ? 'parking' : 'lodging';
+      s.settings.mode = v === 'salem' ? 'walk' : 'mixed';
+      return;
+    }
     if (bind === 'parking.note') { s.parking.note = v; return; }
     if (bind === 'parking.meterUntil') { s.parking.meterUntil = v ? toMin(v) : null; return; }
     const key = bind.split('.')[1];
@@ -1475,6 +1862,9 @@ document.addEventListener('submit', e => {
     if (toMin(d.to) - toMin(d.from) < Number(d.mins)) { toast('That window is shorter than the break.'); return; }
     update(s => { s.breaks.push({ id: uid('b-'), title: d.title.trim() || 'Break', from: d.from, to: d.to, mins: Number(d.mins) || 30 }); });
     toast('Break added.');
+  } else if (kind === 'lodging') {
+    closeModal();
+    setLodging({ name: d.name.trim() || 'Where we\u2019re staying', lat: +f.dataset.lat, lng: +f.dataset.lng, addr: '' });
   } else if (kind === 'custom') {
     closeModal();
     const id = addCustom({ name: d.name.trim(), lat: +f.dataset.lat, lng: +f.dataset.lng });
@@ -1483,6 +1873,75 @@ document.addEventListener('submit', e => {
 });
 
 $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+
+// Live search in the Places tab: only the list redraws, so typing isn't interrupted.
+document.addEventListener('input', e => {
+  if (e.target.id === 'place-q') {
+    ui.q = e.target.value;
+    $('#places-list').innerHTML = placesListHtml();
+  } else if (e.target.id === 'lodging-q') {
+    ui.lodgingQ = e.target.value;
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'lodging-q') { e.preventDefault(); lodgingSearch(); }
+});
+
+// ---- Where we're staying.
+
+function setLodging(l) {
+  update(s => { s.lodging = l; });
+  map.flyTo([l.lat, l.lng], 16);
+  toast(`Saved: you're staying at ${l.name}. Rockport days start and end there.`);
+}
+
+function askLodgingName(lat, lng) {
+  modal(`<h2>\uD83C\uDFE0 Where we're staying</h2><form data-form="lodging" data-lat="${lat}" data-lng="${lng}">
+    <label class="field"><span>Name</span><input type="text" name="name" placeholder="Our rental, the inn\u2026" required></label>
+    <div class="btns"><button class="btn primary" type="submit">Save</button><button class="btn ghost" type="button" data-act="close-modal">Cancel</button></div>
+  </form>`);
+  $('#modal input[name="name"]').focus();
+}
+
+function lodgingSearchModal() {
+  ui.lodgingResults = ui.lodgingResults || null;
+  modal(`<h2>\uD83C\uDFE0 Where are you staying?</h2>
+    <p class="small muted">Type the name or street address of your rental or hotel in Rockport.</p>
+    <div class="searchbar"><input type="search" id="lodging-q" value="${esc(ui.lodgingQ || '')}" placeholder="e.g. 12 Main St, or the inn's name" autocomplete="off">
+    <button class="btn primary" data-act="lodging-search">Search</button></div>
+    <div id="lodging-results">${lodgingResultsHtml()}</div>
+    <div class="btns"><button class="btn" data-act="lodging-pick">Pick on the map instead</button><button class="btn ghost" data-act="close-modal">Cancel</button></div>`);
+  $('#lodging-q').focus();
+}
+
+function lodgingResultsHtml() {
+  const r = ui.lodgingResults;
+  if (!r) return '';
+  if (!r.length) return '<p class="small muted">Nothing found. Try the street address, or pick it on the map.</p>';
+  return `<ul class="list">${r.map((x, i) => `<li><div class="grow"><div class="li-title">${esc(x.name)}</div><div class="li-sub">${esc(x.addr)}</div></div>
+    <button class="btn small primary" data-act="lodging-set" data-i="${i}">This one</button></li>`).join('')}</ul>`;
+}
+
+async function lodgingSearch() {
+  const q = (ui.lodgingQ || '').trim();
+  if (!q) return;
+  $('#lodging-results').innerHTML = '<p class="small muted">Searching\u2026</p>';
+  const [[s, w], [n, e]] = TOWNS.rockport.bounds;
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&viewbox=${w},${n},${e},${s}&bounded=1&q=${encodeURIComponent(q)}`;
+    const data = await (await fetch(url, { headers: { Accept: 'application/json' } })).json();
+    ui.lodgingResults = data.map(r => ({
+      name: r.name || r.display_name.split(',').slice(0, 2).join(',').trim(),
+      addr: r.display_name.split(',').slice(0, 4).join(',').trim(), lat: +r.lat, lng: +r.lon,
+    }));
+  } catch {
+    ui.lodgingResults = [];
+    toast('Search needs a signal. You can pick the spot on the map instead.');
+  }
+  const el = $('#lodging-results');
+  if (el) el.innerHTML = lodgingResultsHtml();
+}
+ACTIONS['lodging-search'] = () => { ui.lodgingQ = $('#lodging-q')?.value || ''; lodgingSearch(); };
 
 // ------------------------------------------------------------ reminders ----
 
@@ -1510,7 +1969,7 @@ function tick() {
     if (it.type !== 'appt' || done.has(it.key)) continue;
     const day = `${state.tripDate}:${it.key}:${it.begin}`;
     if (t >= it.leaveBy - 10 && t < it.leaveBy) alertOnce(`soon:${day}`, `Leave in ${it.leaveBy - t} min`, `${it.name} starts at ${fmtTime(it.begin)}.`);
-    if (t >= it.leaveBy && t < it.begin) alertOnce(`now:${day}`, `🧹 Time to fly to ${it.name}`, `It starts at ${fmtTime(it.begin)}, a ${it.walk} min walk.`);
+    if (t >= it.leaveBy && t < it.begin) alertOnce(`now:${day}`, `🧹 Time to fly to ${it.name}`, `It starts at ${fmtTime(it.begin)}, a ${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'}.`);
   }
   const m = state.parking?.meterUntil;
   if (m != null && t >= m - 15 && t < m + 5) alertOnce(`meter:${state.tripDate}:${m}`, 'Parking runs out soon', `At ${fmtTime(m)}.`);
@@ -1519,8 +1978,33 @@ function tick() {
 
 // --------------------------------------------------------------- start ----
 
+async function loadOsm() {
+  try {
+    const res = await fetch('data/osm-places.json');
+    const data = await res.json();
+    // Skip anything that's already one of our hand-picked places.
+    const words = name => new Set(name.toLowerCase().replace(/[\u2019']/g, '').split(/[^a-z0-9]+/).filter(w => w && !['the', 'and', 'of', 'co', 'inc', 'llc'].includes(w)));
+    const same = (a, b) => {
+      const A = words(a), B = words(b);
+      let both = 0;
+      for (const w of A) if (B.has(w)) both++;
+      return both / Math.max(1, Math.min(A.size, B.size)) >= 0.6;
+    };
+    osmPlaces = data.places.filter(o => !PLACES.some(p => haversine(p, o) < 150 && same(p.name, o.name)));
+    osmMap.clear();
+    for (const o of osmPlaces) osmMap.set(o.id, o);
+    osmFetched = data.fetched || '';
+    osmDrawnKey = '';
+    lastPlanKey = '';
+    refresh();
+  } catch { /* the hand-picked places still work */ }
+}
+
 function boot() {
   setSheet('half');
+  // During the trip, open on today.
+  const today = nowInfo().dateStr;
+  if (state.days[today] && datesBetween(state.trip.start, state.trip.end).includes(today)) state.day = today;
   const hash = location.hash;
   if (hash.startsWith('#plan=')) {
     ui.pendingImport = hash.slice(6);
@@ -1529,7 +2013,9 @@ function boot() {
       <div class="btns"><button class="btn primary" data-act="import-yes">Use this plan</button><button class="btn ghost" data-act="close-modal">Keep mine</button></div>`);
   }
   refresh();
+  save(); // keeps any upgrade of an older save
   if (state.stops.length || state.appts.length) fitPlan();
+  loadOsm();
   // If location was allowed before, show the blue dot straight away.
   navigator.permissions?.query({ name: 'geolocation' }).then(p => { if (p.state === 'granted') startWatch(); }).catch(() => {});
   setInterval(tick, 30000);

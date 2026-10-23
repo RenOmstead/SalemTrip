@@ -36,3 +36,13 @@ test('calendar export has events and leave-by alarms', () => {
   assert.match(ics, /Parking runs out/);
   assert.ok(ics.includes('\r\n'));
 });
+
+test('calendar export covers several days', () => {
+  const day = (dateStr, key, begin) => ({ dateStr, parking: null, items: [{ type: 'stop', key, name: key, lat: 42.6, lng: -70.6, begin, depart: begin + 60, leaveBy: begin - 10, walk: 10, by: 'drive' }] });
+  const ics = buildICS({ days: [day('2026-10-31', 'castle', 600), day('2026-11-01', 'museum', 600)] });
+  assert.equal((ics.match(/BEGIN:VEVENT/g) || []).length, 2);
+  assert.match(ics, /castle-2026-10-31@salemtrip/);
+  assert.match(ics, /DTSTART:20261031T140000Z/); // 10 AM EDT
+  assert.match(ics, /DTSTART:20261101T150000Z/); // 10 AM EST, after the clocks change
+  assert.match(ics, /min drive from the previous stop/);
+});

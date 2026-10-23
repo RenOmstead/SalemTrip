@@ -340,3 +340,19 @@ h2, .empty .big { font-family: var(--spooky); font-weight: 400; font-size: 26px;
   .bats { display: none; }
   .brand .jack { animation: none; }
 }
+
+/* ---------- Trip days ---------- */
+.daystrip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; border-bottom: 1px solid var(--line); scrollbar-width: none; flex: none; }
+.daystrip::-webkit-scrollbar { display: none; }
+.daychip {
+  flex: none; border: 1px solid var(--line); background: var(--panel-2); color: var(--ink-2); border-radius: 12px;
+  padding: 5px 10px; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 92px; text-align: left;
+}
+.daychip .dc-date { font-weight: 750; font-size: 13px; color: var(--ink); }
+.daychip .dc-town { font-size: 12px; }
+.daychip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 12px rgba(255, 123, 28, .25); }
+.daychip[aria-pressed="true"] .dc-date { color: var(--accent); }
+details.daysettings { margin: 0 0 12px; }
+details.daysettings summary { font-weight: 650; color: var(--ink-2); }
+.home-pin { background: #6b3f1f; box-shadow: 0 0 16px rgba(255, 123, 28, .6); }
+.li-title .pick { color: var(--accent); font-size: 12px; }

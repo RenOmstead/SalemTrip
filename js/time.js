@@ -110,10 +110,12 @@ function fold(line) {
 
 /**
  * @param {object} o
- *   dateStr: trip date, items: itinerary items, places: key -> {addr},
- *   parking: {lat, lng, note, meterUntil}|null, mapsLink: (item) => url
+ *   days: [{dateStr, items, parking}] (or a single dateStr/items/parking),
+ *   places: key -> {addr}, mapsLink: (item) => url
+ *   parking: {lat, lng, note, meterUntil}|null
  */
-export function buildICS({ dateStr, items, places = {}, parking = null, mapsLink }) {
+export function buildICS({ days, dateStr, items, places = {}, parking = null, mapsLink }) {
+  days = days || [{ dateStr, items, parking }];
   const now = icsStamp(new Date());
   const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//SalemTrip//Itinerary//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
   const event = ({ uid, start, end, summary, location, description, geo, alarmMin, alarmText }) => {
@@ -128,34 +130,36 @@ export function buildICS({ dateStr, items, places = {}, parking = null, mapsLink
     }
     lines.push('END:VEVENT');
   };
-  for (const it of items) {
-    if (it.type !== 'stop' && it.type !== 'appt') continue;
-    const lead = it.begin - it.leaveBy;
-    const walkNote = it.walk ? `${it.walk} min walk from the previous stop.` : '';
-    event({
-      uid: `${it.key}-${dateStr}@salemtrip`,
-      start: zonedToDate(dateStr, it.begin),
-      end: zonedToDate(dateStr, Math.max(it.depart, it.begin + 5)),
-      summary: it.type === 'appt' ? `\u23F0 ${it.name}` : it.name,
-      location: places[it.key]?.addr || '',
-      geo: it,
-      description: [walkNote, mapsLink ? `Directions: ${mapsLink(it)}` : ''].filter(Boolean).join('\n'),
-      // Appointments get an alarm 5 minutes before you need to leave.
-      alarmMin: it.type === 'appt' ? lead + 5 : null,
-      alarmText: it.type === 'appt' ? `Leave by ${fmtTime(it.leaveBy)} for ${it.name}` : null,
-    });
-  }
-  if (parking?.meterUntil != null) {
-    event({
-      uid: `parking-${dateStr}@salemtrip`,
-      start: zonedToDate(dateStr, parking.meterUntil - 15),
-      end: zonedToDate(dateStr, parking.meterUntil),
-      summary: '\uD83D\uDE97 Parking runs out',
-      description: [parking.note, `Car: https://www.google.com/maps/search/?api=1&query=${parking.lat},${parking.lng}`].filter(Boolean).join('\n'),
-      geo: parking,
-      alarmMin: 0,
-      alarmText: `Parking runs out at ${fmtTime(parking.meterUntil)}`,
-    });
+  for (const { dateStr, items, parking } of days) {
+    for (const it of items) {
+      if (it.type !== 'stop' && it.type !== 'appt') continue;
+      const lead = it.begin - it.leaveBy;
+      const travelNote = it.walk ? `${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'} from the previous stop.` : '';
+      event({
+        uid: `${it.key}-${dateStr}@salemtrip`,
+        start: zonedToDate(dateStr, it.begin),
+        end: zonedToDate(dateStr, Math.max(it.depart, it.begin + 5)),
+        summary: it.type === 'appt' ? `\u23F0 ${it.name}` : it.name,
+        location: places[it.key]?.addr || '',
+        geo: it,
+        description: [travelNote, mapsLink ? `Directions: ${mapsLink(it)}` : ''].filter(Boolean).join('\n'),
+        // Appointments get an alarm 5 minutes before you need to leave.
+        alarmMin: it.type === 'appt' ? lead + 5 : null,
+        alarmText: it.type === 'appt' ? `Leave by ${fmtTime(it.leaveBy)} for ${it.name}` : null,
+      });
+    }
+    if (parking?.meterUntil != null) {
+      event({
+        uid: `parking-${dateStr}@salemtrip`,
+        start: zonedToDate(dateStr, parking.meterUntil - 15),
+        end: zonedToDate(dateStr, parking.meterUntil),
+        summary: '\uD83D\uDE97 Parking runs out',
+        description: [parking.note, `Car: https://www.google.com/maps/search/?api=1&query=${parking.lat},${parking.lng}`].filter(Boolean).join('\n'),
+        geo: parking,
+        alarmMin: 0,
+        alarmText: `Parking runs out at ${fmtTime(parking.meterUntil)}`,
+      });
+    }
   }
   lines.push('END:VCALENDAR');
   return lines.map(fold).join('\r\n') + '\r\n';

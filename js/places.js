@@ -1,6 +1,8 @@
-// Curated places in and around downtown Salem, MA.
-// Hours are typical hours for a Sunday in early November. They can change,
-// so check before you go. Every value can be edited in the app.
+// Hand-picked places for the trip: Salem, Rockport and Gloucester.
+// Hours are typical for late October / early November. They can change, so
+// check before you go. Every value can be edited in the app.
+// `oh` (OpenStreetMap opening_hours format) is used when hours depend on the
+// day of the week; otherwise `open`/`close` apply every day.
 // `mins` is a suggested visit length. `open`/`close` are "HH:MM", or null for
 // places that are always open (statues, parks, streets). `daylight` places are
 // best before dark, so the planner treats them as closing soon after sunset.
@@ -13,6 +15,7 @@ export const CATEGORIES = {
   shop:     { label: 'Shops',                 color: '#8a6d1f', icon: '🔮' },
   parking:  { label: 'Parking',               color: '#1f5fa8', icon: '🅿️' },
   transit:  { label: 'Train & ferry',         color: '#4a5568', icon: '🚆' },
+  tour:     { label: 'Tours & boats',         color: '#0f8a9c', icon: '🐋' },
   custom:   { label: 'My places',             color: '#d9480f', icon: '📍' },
 };
 
@@ -51,7 +54,7 @@ export const PLACES = [
 
   // Museums & historic
   { id: 'pem', name: 'Peabody Essex Museum', cat: 'museum', lat: 42.52167, lng: -70.89222,
-    addr: '161 Essex St, Salem, MA', mins: 120, open: '10:00', close: '17:00',
+    addr: '161 Essex St, Salem, MA', mins: 120, open: '10:00', close: '17:00', oh: 'Mo,Th-Su 10:00-17:00; Tu,We off',
     tip: 'Large art museum. Yin Yu Tang, the Chinese house, needs a timed ticket.', tickets: true },
   { id: 'seven-gables', name: 'The House of the Seven Gables', cat: 'museum', lat: 42.52179, lng: -70.88353,
     addr: '115 Derby St, Salem, MA', mins: 75, open: '10:00', close: '17:00',
@@ -152,8 +155,66 @@ export const PLACES = [
   { id: 'salem-ferry', name: 'Salem Ferry Terminal', cat: 'transit', lat: 42.52280, lng: -70.87860,
     addr: '10 Blaney St, Salem, MA', mins: 0, open: null, close: null,
     tip: 'Seasonal ferry to Boston. It usually stops running at the end of October.' },
+
+  // ---------------- Rockport ----------------
+  { id: 'motif-1', name: 'Motif No. 1', cat: 'museum', lat: 42.659257, lng: -70.614879,
+    addr: 'Bradley Wharf, Rockport, MA', mins: 15, open: null, close: null,
+    tip: 'The red fishing shack, said to be the most-painted building in America.' },
+  { id: 'bearskin-neck', name: 'Bearskin Neck', cat: 'shop', lat: 42.66000, lng: -70.61520,
+    addr: 'Bearskin Neck, Rockport, MA', mins: 60, open: '10:00', close: '17:00',
+    tip: 'A narrow lane of shops, galleries and snacks out to the breakwater. Some shops cut back hours in the off-season.' },
+  { id: 'dock-square', name: 'Dock Square', cat: 'outdoors', lat: 42.65830, lng: -70.61680,
+    addr: 'Dock Square, Rockport, MA', mins: 15, open: null, close: null },
+  { id: 'rockport-art', name: 'Rockport Art Association & Museum', cat: 'museum', lat: 42.65860, lng: -70.61770,
+    addr: '12 Main St, Rockport, MA', mins: 45, open: '10:00', close: '17:00', oh: 'Tu-Sa 10:00-17:00; Su 12:00-17:00; Mo off' },
+  { id: 'shalin-liu', name: 'Shalin Liu Performance Center', cat: 'museum', lat: 42.65930, lng: -70.61860,
+    addr: '37 Main St, Rockport, MA', mins: 90, open: null, close: null,
+    tip: 'Concert hall with a wall of glass onto the harbor. Check the schedule, and add a show under Times.' },
+  { id: 'halibut-point', name: 'Halibut Point State Park', cat: 'outdoors', lat: 42.68700, lng: -70.63100,
+    addr: '4 Gott Ave, Rockport, MA', mins: 75, open: '08:00', close: null, daylight: true,
+    tip: 'A granite quarry pool and tide pools at the tip of Cape Ann. Parking is free Nov–Apr.' },
+  { id: 'paper-house', name: 'The Paper House', cat: 'museum', lat: 42.67295, lng: -70.634648,
+    addr: '52 Pigeon Hill St, Rockport, MA', mins: 25, open: '10:00', close: '17:00', oh: 'Apr-Oct Mo-Su 10:00-17:00; Nov-Mar off',
+    tip: 'A house built from 100,000 newspapers. Usually closes for the season at the end of October.' },
+  { id: 'front-beach', name: 'Front Beach', cat: 'outdoors', lat: 42.65630, lng: -70.61900,
+    addr: 'Beach St, Rockport, MA', mins: 30, open: null, close: null, daylight: true },
+  { id: 'andrews-point', name: 'Andrews Point', cat: 'outdoors', lat: 42.68360, lng: -70.61890,
+    addr: 'Point de Chene Ave, Rockport, MA', mins: 25, open: null, close: null, daylight: true,
+    tip: 'Rocky point with big ocean views. Watch for seals.' },
+  { id: 'roy-moore', name: 'Roy Moore Lobster Co.', cat: 'food', lat: 42.659688, lng: -70.615668,
+    addr: '29 Bearskin Neck, Rockport, MA', mins: 45, open: '11:00', close: '17:00',
+    tip: 'Lobster shack on Bearskin Neck. Seasonal hours, so check ahead.' },
+  { id: 'helmuts', name: "Helmut's Strudel", cat: 'food', lat: 42.660379, lng: -70.614681,
+    addr: '69 Bearskin Neck, Rockport, MA', mins: 20, open: '09:00', close: '17:00' },
+  { id: 'tucks', name: "Tuck's Candy", cat: 'food', lat: 42.658486, lng: -70.616494,
+    addr: '7 Dock Square, Rockport, MA', mins: 15, open: '10:00', close: '18:00',
+    tip: 'Saltwater taffy made on site since 1929.' },
+
+  // ---------------- Gloucester ----------------
+  { id: 'cape-ann-whale-watch', name: 'Cape Ann Whale Watch', cat: 'tour', lat: 42.61570, lng: -70.65220,
+    addr: "415 Main St (Rose's Wharf), Gloucester, MA", mins: 240, open: null, close: null, tickets: true,
+    tip: 'About 4 hours out to Stellwagen Bank. The season usually ends in late October, so confirm your trip is running. Arrive 30 min early. Add your boat time under Times.' },
+  { id: 'hammond-castle', name: 'Hammond Castle Museum', cat: 'museum', lat: 42.585128, lng: -70.692564,
+    addr: '80 Hesperus Ave, Gloucester, MA', mins: 90, open: '09:00', close: '15:30', tickets: true,
+    tip: 'A medieval-style castle on the cliffs. Last entry 2:45 PM. Book ahead if you’re arriving by car.' },
+  { id: 'fishermans-memorial', name: "Gloucester Fisherman's Memorial", cat: 'outdoors', lat: 42.610139, lng: -70.670361,
+    addr: 'Stacy Blvd, Gloucester, MA', mins: 15, open: null, close: null,
+    tip: 'The "Man at the Wheel" statue on the harbor.' },
+  { id: 'cape-ann-museum', name: 'Cape Ann Museum', cat: 'museum', lat: 42.614016, lng: -70.661621,
+    addr: '27 Pleasant St, Gloucester, MA', mins: 75, open: '10:00', close: '17:00', oh: 'Tu-Sa 09:45-17:00; Su 13:00-17:00; Mo off',
+    tip: 'Fitz Henry Lane paintings and Cape Ann history. Parts may be at CAM Green, 13 Poplar St, during renovations.' },
+  { id: 'eastern-point-light', name: 'Eastern Point Lighthouse', cat: 'outdoors', lat: 42.580167, lng: -70.66444,
+    addr: 'Eastern Point Blvd, Gloucester, MA', mins: 30, open: null, close: null, daylight: true,
+    tip: 'Walk the half-mile Dog Bar Breakwater out into the harbor.' },
 ];
 
 export const SALEM_CENTER = [42.5215, -70.8925];
 // Rough box around Salem, used for place search.
 export const SALEM_BOUNDS = [[42.495, -70.935], [42.545, -70.855]];
+
+// Towns a day can be based in. `bounds` is used for place search.
+export const TOWNS = {
+  rockport: { name: 'Rockport', center: [42.6583, -70.6168], bounds: [[42.57, -70.735], [42.70, -70.58]] },
+  salem: { name: 'Salem', center: SALEM_CENTER, bounds: SALEM_BOUNDS, parking: 'museum-place-garage' },
+  gloucester: { name: 'Gloucester', center: [42.6125, -70.6630], bounds: [[42.57, -70.735], [42.70, -70.58]] },
+};

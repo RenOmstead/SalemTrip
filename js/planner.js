@@ -8,6 +8,10 @@
 export const PACES = { slow: 60, normal: 75, fast: 90 }; // meters per minute
 export const DETOUR = 1.3;
 export const LONG_WALK_MIN = 25;
+// In 'mixed' mode, any leg longer than this on foot is driven instead.
+export const DRIVE_FROM_WALK_MIN = 20;
+export const DRIVE_SPEED = 550; // meters per minute on local roads
+export const PARK_MIN = 8;      // finding a spot and walking from the car
 
 export function toMin(hhmm) {
   if (hhmm == null || hhmm === '') return null;
@@ -52,6 +56,20 @@ export function walkMinutes(a, b, pace = PACES.normal) {
   return m < 40 ? 0 : Math.ceil(m / pace);
 }
 
+export function driveMinutes(a, b) {
+  return Math.ceil(walkMeters(a, b) / DRIVE_SPEED) + PARK_MIN;
+}
+
+// Travel time for one leg, and whether it's walked or driven.
+export function legTime(a, b, { pace = PACES.normal, mode = 'walk' } = {}) {
+  const walk = walkMinutes(a, b, pace);
+  if (mode === 'mixed' && walk > DRIVE_FROM_WALK_MIN) {
+    const drive = driveMinutes(a, b);
+    if (drive < walk) return { mins: drive, by: 'drive' };
+  }
+  return { mins: walk, by: 'walk' };
+}
+
 export function fmtDistance(meters) {
   const miles = meters / 1609.344;
   return miles < 0.1 ? `${Math.round(meters * 3.281 / 10) * 10} ft` : `${miles.toFixed(miles < 1 ? 2 : 1)} mi`;
@@ -61,12 +79,13 @@ export function fmtDistance(meters) {
 // `violation` adds up the minutes that break a rule: arriving late to an
 // appointment, staying past closing time, or finishing after the end of the day.
 function simulate(seq, ctx) {
-  const { start, end, startTime, endTime, pace, buffer } = ctx;
+  const { start, end, startTime, endTime, buffer } = ctx;
   let t = startTime, pos = start, walk = 0, wait = 0, violation = 0;
   const steps = [];
   for (const node of seq) {
     // A break (lunch, coffee, rest) has no fixed spot. It happens wherever you are.
-    const travel = node.anywhere ? 0 : walkMinutes(pos, node, pace);
+    const leg = node.anywhere ? { mins: 0, by: 'walk' } : legTime(pos, node, ctx);
+    const travel = leg.mins;
     const transition = travel > 0 ? travel + buffer : 0;
     const arrive = t + transition;
     let begin, late = 0, over = 0;
@@ -82,19 +101,19 @@ function simulate(seq, ctx) {
     walk += travel;
     wait += idle;
     violation += late + over;
-    steps.push({ node, travel, arrive, begin, depart, wait: idle, late, over });
+    steps.push({ node, travel, by: leg.by, arrive, begin, depart, wait: idle, late, over });
     t = depart;
     if (!node.anywhere) pos = node;
   }
-  let endTravel = 0, finish = t;
+  let endTravel = 0, endBy = 'walk', finish = t;
   if (end) {
-    endTravel = walkMinutes(pos, end, pace);
+    ({ mins: endTravel, by: endBy } = legTime(pos, end, ctx));
     finish = t + endTravel;
     walk += endTravel;
   }
   const overtime = endTime != null ? Math.max(0, finish - endTime) : 0;
   violation += overtime;
-  return { steps, walk, wait, violation, overtime, endTravel, finish };
+  return { steps, walk, wait, violation, overtime, endTravel, endBy, finish };
 }
 
 function better(a, b) {
@@ -186,11 +205,35 @@ function seeded(seed) {
   };
 }
 
-function construct(appts, must, nice, ctx, limit, rand) {
-  let r = insertAll(appts.slice(), must, ctx, limit, rand);
+// Put each stop, in the given order, wherever it fits best.
+function insertInOrder(seq, pool, ctx, limit) {
+  const left = [];
+  for (const stop of pool) {
+    const ins = bestInsertion(seq, stop, ctx, limit);
+    if (ins) seq = ins.seq; else left.push(stop);
+  }
+  return { seq, pool: left };
+}
+
+function shuffled(list, rand) {
+  const a = list.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// `rand` makes a varied attempt; with `shuffle`, stops go in a random order
+// instead of cheapest-first, which finds plans where a long stop has to claim
+// its slot before the quick ones do.
+function construct(appts, must, nice, ctx, limit, rand, shuffle = false) {
+  const fill = shuffle ? (seq, pool) => insertInOrder(seq, shuffled(pool, rand), ctx, limit)
+    : (seq, pool) => insertAll(seq, pool, ctx, limit, rand);
+  let r = fill(appts.slice(), must);
   let seq = r.seq;
   let leftMust = r.pool;
-  r = insertAll(seq, nice, ctx, limit, rand);
+  r = fill(seq, nice);
   seq = improve(r.seq, ctx, limit);
   let leftNice = r.pool;
 
@@ -265,6 +308,7 @@ function whyUnscheduled(stop, ctx) {
  *          `anywhere` stops (breaks) take no walking and happen wherever you are.
  *   appointments: [{key, name, lat, lng, start, mins}]
  *   pace: meters/min, buffer: minutes added to each walk (finding the door, etc.)
+ *   mode: 'walk' (walk everything) or 'mixed' (drive legs that are long on foot)
  */
 export function buildItinerary(opts) {
   const ctx = {
@@ -273,12 +317,15 @@ export function buildItinerary(opts) {
     startTime: opts.startTime,
     endTime: opts.endTime ?? null,
     pace: opts.pace || PACES.normal,
+    mode: opts.mode || 'walk',
     buffer: opts.buffer ?? 5,
   };
   const appts = (opts.appointments || [])
     .map(a => ({ ...a, kind: 'appt' }))
     .sort((a, b) => a.start - b.start);
-  const stops = (opts.stops || []).map(s => ({ ...s, kind: 'stop' }));
+  // Places that are closed all day can't be scheduled at all.
+  const closedStops = (opts.stops || []).filter(s => s.closed);
+  const stops = (opts.stops || []).filter(s => !s.closed).map(s => ({ ...s, kind: 'stop' }));
 
   // Appointments are fixed. If two of them already clash, that lateness is the
   // baseline: flexible stops may not make it any worse.
@@ -298,7 +345,7 @@ export function buildItinerary(opts) {
   // The run count is fixed (not timed) so every phone gets the same plan.
   const tries = left ? Math.max(6, Math.min(30, Math.round(500 / Math.max(1, stops.length)))) : 8;
   for (let i = 0; i < tries; i++) {
-    const c = construct(appts, must, nice, ctx, limit, rand);
+    const c = construct(appts, must, nice, ctx, limit, rand, i % 2 === 1);
     if (betterPlan(c, best)) best = c;
   }
   const { leftMust } = best;
@@ -317,11 +364,11 @@ export function buildItinerary(opts) {
     const warnings = [];
     if (st.late > 0) warnings.push(`About ${st.late} min late. Leave earlier or drop the stop before it.`);
     if (st.over > 0) warnings.push(`Closes at ${fmtTime(n.close)}, ${st.over} min before you'd finish.`);
-    if (st.travel >= LONG_WALK_MIN) warnings.push(`Long walk (${st.travel} min). A car or rideshare may be quicker.`);
+    if (st.by === 'walk' && st.travel >= LONG_WALK_MIN) warnings.push(`Long walk (${st.travel} min). A car or rideshare may be quicker.`);
     items.push({
       type: n.kind, key: n.key, name: n.name, lat: n.lat, lng: n.lng, anywhere: !!n.anywhere,
       priority: n.priority, mins: n.mins, open: n.open, close: n.close,
-      walk: st.travel, dist: n.anywhere ? 0 : walkMeters(prev, n),
+      walk: st.travel, by: st.by, dist: n.anywhere ? 0 : walkMeters(prev, n),
       leaveBy: st.begin - (st.travel > 0 ? st.travel + ctx.buffer : 0),
       arrive: st.arrive, begin: st.begin, depart: st.depart, wait: st.wait, warnings,
     });
@@ -332,12 +379,14 @@ export function buildItinerary(opts) {
     if (sim.overtime > 0) warnings.push(`Runs ${sim.overtime} min past your end time.`);
     items.push({
       type: 'end', name: ctx.end.name || 'End', lat: ctx.end.lat, lng: ctx.end.lng,
-      walk: sim.endTravel, dist: walkMeters(prev, ctx.end), arrive: sim.finish, warnings,
+      walk: sim.endTravel, by: sim.endBy, dist: walkMeters(prev, ctx.end), arrive: sim.finish, warnings,
     });
   }
   const unscheduled = [...leftMust, ...leftNice].map(s => ({
     key: s.key, name: s.name, priority: s.priority, reason: whyUnscheduled(s, ctx),
-  }));
+  })).concat(closedStops.map(s => ({
+    key: s.key, name: s.name, priority: s.priority, reason: 'Closed that day.',
+  })));
   return {
     items,
     unscheduled,
