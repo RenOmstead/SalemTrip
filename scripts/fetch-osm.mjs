@@ -88,7 +88,11 @@ export function toPlace(el) {
   } else {
     return null;
   }
-  const name = t.name || (cat === 'parking' ? (t.operator ? `${t.operator} parking` : 'Parking') : null);
+  let name = t.name;
+  if (!name && cat === 'parking') {
+    const kind = sub.startsWith('Parking garage') ? 'Parking garage' : 'Parking lot';
+    name = t.operator ? `${t.operator} ${kind.toLowerCase()}` : t['addr:street'] ? `${kind}, ${t['addr:street']}` : kind;
+  }
   if (!name) return null;
   const p = {
     id: `osm-${el.type[0]}${el.id}`, name, cat, sub,

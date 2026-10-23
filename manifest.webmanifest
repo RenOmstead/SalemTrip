@@ -1,7 +1,7 @@
 {
   "name": "Salem Trip",
   "short_name": "Salem Trip",
-  "description": "Our map, parking spot and day plan for Salem, MA.",
+  "description": "Our map, parking spots and day plans for Rockport, Gloucester and Salem, MA.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

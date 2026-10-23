@@ -114,3 +114,24 @@ test('fits more places rather than one long visit when the day is tight', () => 
   const r2 = buildItinerary({ ...tight, stops: [stop('pem', { priority: 'must' }), ...['seven-gables', 'pepper-co', 'custom-house'].map(id => stop(id))] });
   assert.ok(r2.items.some(i => i.key === 'pem'));
 });
+
+test('places closed that day are never scheduled', () => {
+  const r = buildItinerary({ ...base, stops: [stop('witch-museum'), stop('pem', { closed: true })] });
+  assert.ok(!r.items.some(i => i.key === 'pem'));
+  assert.equal(r.unscheduled.find(u => u.key === 'pem').reason, 'Closed that day.');
+});
+
+test('mixed mode drives the long legs and walks the short ones', () => {
+  const dock = { lat: 42.6583, lng: -70.6168, name: 'Rental' };
+  const halibut = { key: 'halibut', name: 'Halibut Point', lat: 42.687, lng: -70.631, mins: 60, open: null, close: null, priority: 'nice' };
+  const motif = { key: 'motif', name: 'Motif No. 1', lat: 42.659257, lng: -70.614879, mins: 10, open: null, close: null, priority: 'nice' };
+  const walkOnly = buildItinerary({ ...base, start: dock, end: dock, stops: [halibut, motif] });
+  const mixed = buildItinerary({ ...base, start: dock, end: dock, mode: 'mixed', stops: [halibut, motif] });
+  const h = mixed.items.find(i => i.key === 'halibut');
+  assert.equal(h.by, 'drive');
+  assert.ok(h.walk < 25, `drive to Halibut Point took ${h.walk} min`);
+  const short = buildItinerary({ ...base, start: dock, end: dock, mode: 'mixed', stops: [motif] });
+  assert.equal(short.items.find(i => i.key === 'motif').by, 'walk');
+  assert.ok(walkOnly.items.find(i => i.key === 'halibut').warnings.some(w => /Long walk/.test(w)));
+  assert.ok(!h.warnings.some(w => /Long walk/.test(w)));
+});
