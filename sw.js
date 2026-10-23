@@ -2,7 +2,7 @@
 // fall back to the saved copy with no signal. Map tiles: use the saved copy if
 // we have one, so places you've already looked at work offline.
 
-const APP_CACHE = 'salemtrip-app-v3';
+const APP_CACHE = 'salemtrip-app-v4';
 const TILE_CACHE = 'salemtrip-tiles-v2';
 const MAX_TILES = 1200;
 
@@ -12,7 +12,7 @@ const APP_FILES = [
   'vendor/leaflet/leaflet.js', 'vendor/leaflet/leaflet.css',
   'vendor/leaflet/images/marker-icon.png', 'vendor/leaflet/images/marker-icon-2x.png',
   'vendor/leaflet/images/marker-shadow.png', 'vendor/leaflet/images/layers.png',
-  'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-180.png',
+  'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-180.png', 'vendor/fonts/creepster.woff2',
 ];
 
 const TILE_HOSTS = ['tile.openstreetmap.org', 'tile.openstreetmap.fr'];

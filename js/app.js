@@ -18,7 +18,7 @@ function defaults() {
     tripDate: '2026-11-01',
     settings: {
       dayStart: '10:00', dayEnd: '20:00', pace: 'normal', buffer: 5,
-      startFrom: 'parking', endAtStart: true, mapsApp: 'auto', tiles: 'osm',
+      startFrom: 'parking', endAtStart: true, mapsApp: 'auto', tiles: 'osm', mapLook: 'haunted',
       mapFilter: 'all', practice: false,
     },
     custom: [],   // places we added: {id, name, cat:'custom', lat, lng, addr, mins, open, close}
@@ -47,6 +47,7 @@ function normalize(s) {
   if (!out.edits || typeof out.edits !== 'object') out.edits = {};
   // Older saves may name a map style that needs an API key now.
   if (!['osm', 'hot'].includes(out.settings.tiles)) out.settings.tiles = 'osm';
+  if (!['haunted', 'daylight'].includes(out.settings.mapLook)) out.settings.mapLook = 'haunted';
   return out;
 }
 
@@ -273,6 +274,9 @@ function setTiles(name) {
     .addTo(map);
 }
 setTiles(state.settings.tiles);
+// The haunted look is a color filter over the normal map, so it needs no extra service.
+const setLook = look => map.getContainer().classList.toggle('map-haunted', look !== 'daylight');
+setLook(state.settings.mapLook);
 
 // If no street map has loaded after a while, say so instead of showing a blank map.
 setTimeout(() => {
@@ -632,7 +636,7 @@ function renderChips() {
   const n = nowInfo();
   const days = daysBetween(n.dateStr, state.tripDate);
   const when = isTripDay() ? `Now ${fmtTime(n.minutes)}` : days > 0 ? `${fmtDate(state.tripDate)} · in ${days} day${days === 1 ? '' : 's'}` : fmtDate(state.tripDate);
-  $('#chips').innerHTML = `<span class="chip">${esc(when)}</span><span class="chip">🌅 ${fmtTime(sunset)}</span>`;
+  $('#chips').innerHTML = `<span class="chip">${esc(when)}</span><span class="chip">🌘 Dark at ${fmtTime(sunset)}</span>`;
 }
 
 function tl(item, opts = {}) {
@@ -663,7 +667,7 @@ function tl(item, opts = {}) {
 
 function leg(item, prevName) {
   if (item.anywhere) return '';
-  const free = item.wait >= 15 ? `<span class="tl-free">☕ ${fmtDuration(item.wait)} free${item.type === 'appt' ? ' before this' : ''}</span>` : '';
+  const free = item.wait >= 15 ? `<span class="tl-free">🦇 ${fmtDuration(item.wait)} to wander${item.type === 'appt' ? ' before this' : ''}</span>` : '';
   const walk = item.walk > 0 ? `🚶 ${item.walk} min · ${fmtDistance(item.dist)}` : '🚶 Right here';
   const key = item.type === 'end' ? (plan.base.car ? 'car' : 'base') : item.key;
   return `
@@ -688,7 +692,7 @@ function renderToday() {
     if (nxt) {
       const late = n.minutes > nxt.leaveBy + 10 && nxt.type === 'appt';
       html += `<div class="card next">
-        <div class="eyebrow">${nxt.begin <= n.minutes ? 'Now' : 'Up next'}</div>
+        <div class="eyebrow">🕯️ ${nxt.begin <= n.minutes ? 'Now' : 'Up next'}</div>
         <div class="big">${esc(nxt.name)}</div>
         <div class="small">${fmtTime(nxt.begin)}–${fmtTime(nxt.depart)}${!nxt.anywhere && fix ? ` · ${walkMinutes(fix, nxt, pace())} min walk from you` : ''}</div>
         ${late ? '<div class="warnline">You may be running late.</div>' : ''}
@@ -698,7 +702,7 @@ function renderToday() {
           <button class="btn" data-act="done" data-id="${esc(nxt.key)}">✓ Done</button>
         </div></div>`;
     } else if (stopsCount) {
-      html += `<div class="card good"><div class="big">That's everything on the list 🎉</div>
+      html += `<div class="card good"><div class="big">You survived Salem 🎃</div><p class="small">That's everything on the list.</p>
         <div class="btns">${dirLink(plan.base.car ? 'car' : 'base', plan.base.car ? 'Walk to car' : 'Directions back', 'btn primary')}</div></div>`;
     }
     if (appt && (!nxt || appt.key !== nxt.key)) {
@@ -722,13 +726,13 @@ function renderToday() {
     }
   } else {
     const days = daysBetween(n.dateStr, state.tripDate);
-    html += `<h2>${days > 0 ? `${days} day${days === 1 ? '' : 's'} until Salem` : 'Salem day plan'}</h2>
+    html += `<h2>${days > 0 ? `${days} night${days === 1 ? '' : 's'} until Salem` : 'The haunting begins'}</h2>
       <p class="muted small">${fmtDate(state.tripDate)} · ${fmtTime(toMin(state.settings.dayStart))} to ${fmtTime(toMin(state.settings.dayEnd))}. Sunset is at ${fmtTime(sun().sunset)}.${clockChangeNote()}</p>`;
   }
 
   if (empty) {
     html += `<div class="empty card">
-      <div class="big">Build your day</div>
+      <div class="big">Plan your haunting</div>
       <p>Pick places in <b>Places</b> (or tap pins on the map). Add anything with a set time, like a tour or a dinner booking, in <b>Times</b>. The plan builds itself around them.</p>
       <div class="btns" style="justify-content:center">
         <button class="btn primary" data-act="tab" data-tab="places">Pick places</button>
@@ -770,7 +774,7 @@ function renderToday() {
   html += '</ul>';
 
   if (plan.unscheduled.length) {
-    html += `<h3>Didn't fit</h3><ul class="list">${plan.unscheduled.map(u => `
+    html += `<h3>Lost in the fog (didn't fit)</h3><ul class="list">${plan.unscheduled.map(u => `
       <li><div class="grow"><div class="li-title">${esc(u.name)}</div><div class="small muted" style="white-space:normal">${esc(u.reason)}</div></div>
       ${state.stops.some(s => s.id === u.key && s.priority !== 'must') ? `<button class="btn small" data-act="toggle-must" data-id="${esc(u.key)}">★ Must-see</button>` : ''}
       </li>`).join('')}</ul>`;
@@ -988,9 +992,9 @@ function renderMore() {
         <option value="apple" ${s.mapsApp === 'apple' ? 'selected' : ''}>Apple Maps</option>
         <option value="google" ${s.mapsApp === 'google' ? 'selected' : ''}>Google Maps</option>
       </select></label>
-      <label class="field"><span>Map style</span><select data-bind="settings.tiles">
-        <option value="osm" ${s.tiles === 'osm' ? 'selected' : ''}>OpenStreetMap</option>
-        <option value="hot" ${s.tiles === 'hot' ? 'selected' : ''}>OpenStreetMap (Humanitarian)</option>
+      <label class="field"><span>Map style</span><select data-bind="settings.mapLook">
+        <option value="haunted" ${s.mapLook !== 'daylight' ? 'selected' : ''}>🦇 Haunted night</option>
+        <option value="daylight" ${s.mapLook === 'daylight' ? 'selected' : ''}>☀️ Daylight (easier in bright sun)</option>
       </select></label>
     </div>
     <label class="check"><input type="checkbox" data-bind="settings.mapFilter" ${s.mapFilter === 'plan' ? 'checked' : ''}> Only show places in our plan on the map</label>
@@ -1124,7 +1128,7 @@ function toggleMust(id) {
 function markDone(key) {
   update(s => { if (!s.done.includes(key)) s.done.push(key); });
   const nxt = nextItem();
-  toast(nxt ? `Next up: ${nxt.name}` : 'All done!', { label: 'Undo', run: () => update(s => { s.done = s.done.filter(k => k !== key); }) });
+  toast(nxt ? `Next up: ${nxt.name}` : 'All done. You survived! 🎃', { label: 'Undo', run: () => update(s => { s.done = s.done.filter(k => k !== key); }) });
 }
 
 function skipStop(key) {
@@ -1167,7 +1171,7 @@ function loadSample() {
   ui.tab = 'today';
   renderPane();
   fitPlan();
-  toast('Loaded a sample day. Change anything you like.');
+  toast('Summoned a sample day. Change anything you like.');
 }
 
 // Share links put the whole plan in the URL after "#plan=", so nothing goes
@@ -1443,6 +1447,7 @@ document.addEventListener('change', async e => {
     if ((key === 'dayStart' || key === 'dayEnd') && !v) return;
     s.settings[key] = v;
     if (key === 'tiles') setTiles(v);
+    if (key === 'mapLook') setLook(v);
   });
 });
 
@@ -1505,7 +1510,7 @@ function tick() {
     if (it.type !== 'appt' || done.has(it.key)) continue;
     const day = `${state.tripDate}:${it.key}:${it.begin}`;
     if (t >= it.leaveBy - 10 && t < it.leaveBy) alertOnce(`soon:${day}`, `Leave in ${it.leaveBy - t} min`, `${it.name} starts at ${fmtTime(it.begin)}.`);
-    if (t >= it.leaveBy && t < it.begin) alertOnce(`now:${day}`, `Time to head to ${it.name}`, `It starts at ${fmtTime(it.begin)}, a ${it.walk} min walk.`);
+    if (t >= it.leaveBy && t < it.begin) alertOnce(`now:${day}`, `🧹 Time to fly to ${it.name}`, `It starts at ${fmtTime(it.begin)}, a ${it.walk} min walk.`);
   }
   const m = state.parking?.meterUntil;
   if (m != null && t >= m - 15 && t < m + 5) alertOnce(`meter:${state.tripDate}:${m}`, 'Parking runs out soon', `At ${fmtTime(m)}.`);
