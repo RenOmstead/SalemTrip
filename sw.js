@@ -2,7 +2,7 @@
 // fall back to the saved copy with no signal. Map tiles: use the saved copy if
 // we have one, so places you've already looked at work offline.
 
-const APP_CACHE = 'salemtrip-app-v4';
+const APP_CACHE = 'salemtrip-app-v5';
 const TILE_CACHE = 'salemtrip-tiles-v2';
 const MAX_TILES = 1200;
 
@@ -19,7 +19,10 @@ const TILE_HOSTS = ['tile.openstreetmap.org', 'tile.openstreetmap.fr'];
 const TILE_MAX_AGE = 7 * 24 * 3600 * 1000;
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(APP_CACHE).then(c => c.addAll(APP_FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache, so a new version never
+  // saves stale copies of the files.
+  const fresh = APP_FILES.map(u => new Request(u, { cache: 'reload' }));
+  event.waitUntil(caches.open(APP_CACHE).then(c => c.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {
@@ -48,7 +51,8 @@ self.addEventListener('fetch', event => {
 async function appFile(req) {
   const cache = await caches.open(APP_CACHE);
   try {
-    const res = await withTimeout(fetch(req), 4000);
+    // no-cache: always check with the server (cheap when nothing changed).
+    const res = await withTimeout(fetch(req, { cache: 'no-cache' }), 4000);
     if (res.ok) cache.put(req, res.clone());
     return res;
   } catch {
