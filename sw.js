@@ -2,9 +2,9 @@
 // fall back to the saved copy with no signal. Map tiles: use the saved copy if
 // we have one, so places you've already looked at work offline.
 
-const APP_CACHE = 'salemtrip-app-v1';
+const APP_CACHE = 'salemtrip-app-v2';
 const TILE_CACHE = 'salemtrip-tiles-v1';
-const MAX_TILES = 2500;
+const MAX_TILES = 1200;
 
 const APP_FILES = [
   './', 'index.html', 'manifest.webmanifest',
@@ -63,16 +63,19 @@ async function tile(req) {
   const cache = await caches.open(TILE_CACHE);
   const hit = await cache.match(req);
   if (hit) return hit;
+  let res;
   try {
-    const res = await fetch(req);
-    if (res.ok || res.type === 'opaque') {
-      await cache.put(req, res.clone());
-      if (++tileWrites % 100 === 0) trim(cache);
-    }
-    return res;
+    res = await fetch(req);
   } catch {
     return Response.error();
   }
+  if (res.ok || res.type === 'opaque') {
+    // Saving is a bonus. If storage is full, still show the tile.
+    cache.put(req, res.clone())
+      .then(() => { if (++tileWrites % 100 === 0) trim(cache); })
+      .catch(() => {});
+  }
+  return res;
 }
 
 async function trim(cache) {
