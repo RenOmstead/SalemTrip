@@ -250,12 +250,16 @@ const map = L.map('map', { zoomControl: false, tap: false }).setView(SALEM_CENTE
 map.attributionControl.setPrefix('');
 if (innerWidth >= 900) L.control.zoom({ position: 'bottomright' }).addTo(map);
 let tileLayer = null;
+let tilesLoaded = 0;
 function setTiles(name) {
   const t = TILES[name] || TILES.voyager;
   if (tileLayer) tileLayer.remove();
   let ok = 0, bad = 0;
-  tileLayer = L.tileLayer(t.url, { subdomains: t.sub, maxZoom: t.max, maxNativeZoom: Math.min(t.max, 19), attribution: t.attr, crossOrigin: true })
-    .on('tileload', () => { ok++; })
+  tileLayer = L.tileLayer(t.url, { subdomains: t.sub, maxZoom: t.max, maxNativeZoom: Math.min(t.max, 19), attribution: t.attr })
+    .on('tileload', () => {
+      ok++;
+      if (!tilesLoaded++) $('#alertbar[data-kind="tiles"]')?.setAttribute('hidden', '');
+    })
     .on('tileerror', () => {
       // If this tile server is down, switch to the other one.
       if (++bad > 6 && ok === 0 && name !== 'osm') { setTiles('osm'); toast('Switched to backup map tiles.'); }
@@ -263,6 +267,19 @@ function setTiles(name) {
     .addTo(map);
 }
 setTiles(state.settings.tiles);
+
+// If no street map has loaded after a while, say so instead of showing a blank map.
+setTimeout(() => {
+  if (tilesLoaded) return;
+  const bar = $('#alertbar');
+  const why = navigator.onLine === false
+    ? 'This device looks offline.'
+    : 'The map server can\u2019t be reached. A content blocker, VPN or private DNS setting can cause this.';
+  bar.dataset.kind = 'tiles';
+  bar.innerHTML = `<div class="grow"><b>The street map isn\u2019t loading</b><span class="small">${why} Pins, directions and the plan still work.</span></div>
+    <button data-act="reload">Try again</button>`;
+  bar.hidden = false;
+}, 12000);
 
 const placesLayer = L.layerGroup().addTo(map);
 const planLine = L.polyline([], { color: '#e8711a', weight: 4, opacity: .75, dashArray: '2 8', lineCap: 'round' }).addTo(map);
@@ -722,7 +739,7 @@ function renderToday() {
   const t = plan.totals;
   html += `<div class="row small muted" style="margin-bottom:8px">
       <span class="grow">${t.stops} stop${t.stops === 1 ? '' : 's'} · ${fmtDistance(t.walkMeters)} on foot (~${fmtDuration(t.walkMin)})</span>
-      <span>${plan.items.at(-1).type === 'end' ? `back ${fmtTime(t.finish)}` : `done ${fmtTime(t.finish)}`}</span>
+      <span>${plan.items[plan.items.length - 1].type === 'end' ? `back ${fmtTime(t.finish)}` : `done ${fmtTime(t.finish)}`}</span>
     </div>`;
   if (plan.live && state.done.length) {
     html += `<p class="small muted">✓ ${state.done.length} done already. Re-planned at ${fmtTime(toMin(state.replan.time))}.</p>`;
@@ -1117,7 +1134,7 @@ async function replan() {
   try { where = await currentPosition(); } catch { /* fall back below */ }
   if (!where) {
     // No GPS: assume we're at the last place we finished.
-    const last = plan.items.filter(i => state.done.includes(i.key) && !i.anywhere).at(-1);
+    const last = plan.items.filter(i => state.done.includes(i.key) && !i.anywhere).pop();
     where = last ? { lat: last.lat, lng: last.lng } : plan.base;
     toast('No location, so re-planning from your last stop.');
   }
@@ -1355,6 +1372,7 @@ const ACTIONS = {
   'cancel-pick': () => endPick(),
   'toast-action': () => { $('#toast').hidden = true; ui.toastAction?.(); },
   'dismiss-alert': () => { $('#alertbar').hidden = true; },
+  reload: () => location.reload(),
 };
 
 document.addEventListener('click', e => {
@@ -1463,6 +1481,7 @@ function alertOnce(key, title, body) {
   notified.add(key);
   try { localStorage.setItem(NOTIFIED, JSON.stringify([...notified])); } catch { /* ignore */ }
   const bar = $('#alertbar');
+  bar.dataset.kind = 'reminder';
   bar.innerHTML = `<div class="grow"><b>${esc(title)}</b><span class="small">${esc(body)}</span></div><button data-act="dismiss-alert">OK</button>`;
   bar.hidden = false;
   try { navigator.vibrate?.([200, 100, 200]); } catch { /* ignore */ }
