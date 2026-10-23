@@ -2,8 +2,8 @@
 // fall back to the saved copy with no signal. Map tiles: use the saved copy if
 // we have one, so places you've already looked at work offline.
 
-const APP_CACHE = 'salemtrip-app-v2';
-const TILE_CACHE = 'salemtrip-tiles-v1';
+const APP_CACHE = 'salemtrip-app-v3';
+const TILE_CACHE = 'salemtrip-tiles-v2';
 const MAX_TILES = 1200;
 
 const APP_FILES = [
@@ -15,7 +15,8 @@ const APP_FILES = [
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-180.png',
 ];
 
-const TILE_HOSTS = ['basemaps.cartocdn.com', 'tile.openstreetmap.org'];
+const TILE_HOSTS = ['tile.openstreetmap.org', 'tile.openstreetmap.fr'];
+const TILE_MAX_AGE = 7 * 24 * 3600 * 1000;
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(APP_CACHE).then(c => c.addAll(APP_FILES)).then(() => self.skipWaiting()));
@@ -62,12 +63,14 @@ let tileWrites = 0;
 async function tile(req) {
   const cache = await caches.open(TILE_CACHE);
   const hit = await cache.match(req);
-  if (hit) return hit;
+  // Saved tiles are used for up to a week, then refreshed when there's a signal.
+  const saved = hit && Date.parse(hit.headers.get('date') || '');
+  if (hit && !(saved && Date.now() - saved > TILE_MAX_AGE)) return hit;
   let res;
   try {
     res = await fetch(req);
   } catch {
-    return Response.error();
+    return hit || Response.error();
   }
   if (res.ok || res.type === 'opaque') {
     // Saving is a bonus. If storage is full, still show the tile.
