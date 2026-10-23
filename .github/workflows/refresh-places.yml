@@ -1,0 +1,25 @@
+name: Refresh places from OpenStreetMap
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/fetch-osm.mjs
+      - name: Commit if anything changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/osm-places.json
+          git diff --cached --quiet && { echo "No changes"; exit 0; }
+          git commit -m "Refresh Salem places from OpenStreetMap"
+          git push
