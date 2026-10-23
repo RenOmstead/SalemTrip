@@ -29,3 +29,10 @@ test('unnamed parking gets a usable name; unnamed shops are skipped', () => {
   assert.equal(toPlace({ type: 'node', id: 9, lat: 1, lon: 1, tags: { amenity: 'parking' } }).name, 'Parking');
   assert.equal(toPlace({ type: 'node', id: 9, lat: 1, lon: 1, tags: { shop: 'gift' } }), null);
 });
+
+test('places are tagged with the town area they are in', async () => {
+  const { areaOf } = await import('../scripts/fetch-osm.mjs');
+  assert.equal(areaOf(42.5219, -70.894), 'salem');
+  assert.equal(areaOf(42.6578, -70.6177), 'capeann'); // Dock Square, Rockport
+  assert.equal(areaOf(42.36, -71.06), null); // Boston
+});
