@@ -1,0 +1,129 @@
+// Downloads Salem's shops, food, museums/attractions and parking from
+// OpenStreetMap (Overpass API, no key needed) and writes data/osm-places.json.
+// Run by the "Refresh places" GitHub workflow: node scripts/fetch-osm.mjs
+
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// Salem, MA, with a little room around the city line.
+export const BBOX = [42.485, -70.955, 42.552, -70.845]; // south, west, north, east
+
+const MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+
+export function overpassQuery([s, w, n, e] = BBOX) {
+  const b = `${s},${w},${n},${e}`;
+  return `[out:json][timeout:120];
+(
+  nwr["shop"]["name"](${b});
+  nwr["amenity"~"^(restaurant|cafe|fast_food|bar|pub|ice_cream|biergarten|food_court)$"]["name"](${b});
+  nwr["tourism"~"^(museum|gallery|attraction)$"]["name"](${b});
+  nwr["amenity"="parking"](${b});
+);
+out center tags;`;
+}
+
+const FOOD = { restaurant: 'Restaurant', cafe: 'Cafe', fast_food: 'Fast food', bar: 'Bar', pub: 'Pub', ice_cream: 'Ice cream', biergarten: 'Beer garden', food_court: 'Food court' };
+const FOOD_SHOPS = new Set(['bakery', 'confectionery', 'chocolate', 'coffee', 'tea', 'pastry', 'deli', 'ice_cream']);
+const MINS = { Restaurant: 60, Cafe: 25, 'Fast food': 30, Bar: 60, Pub: 60, 'Ice cream': 15, 'Beer garden': 60, 'Food court': 45 };
+
+const titleCase = s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+function address(t) {
+  const street = [t['addr:housenumber'], t['addr:street']].filter(Boolean).join(' ');
+  const city = t['addr:city'] || '';
+  return [street, city].filter(Boolean).join(', ');
+}
+
+// Turn one OpenStreetMap element into a compact place, or null to skip it.
+export function toPlace(el) {
+  const t = el.tags || {};
+  const lat = el.lat ?? el.center?.lat, lng = el.lon ?? el.center?.lon;
+  if (lat == null || lng == null) return null;
+  let cat, sub, mins;
+  if (t.amenity === 'parking') {
+    if (['private', 'no'].includes(t.access)) return null;
+    cat = 'parking';
+    const garage = ['multi-storey', 'underground'].includes(t.parking);
+    sub = [garage ? 'Parking garage' : 'Parking lot',
+      t.access === 'customers' ? 'customers only' : '',
+      t.fee === 'yes' ? 'paid' : t.fee === 'no' ? 'free' : ''].filter(Boolean).join(' · ');
+    mins = 0;
+  } else if (FOOD[t.amenity]) {
+    cat = 'food';
+    sub = FOOD[t.amenity] + (t.cuisine ? ` · ${titleCase(t.cuisine.split(';')[0])}` : '');
+    mins = MINS[FOOD[t.amenity]];
+  } else if (t.tourism === 'museum' || t.tourism === 'gallery' || t.tourism === 'attraction') {
+    cat = 'museum';
+    sub = { museum: 'Museum', gallery: 'Gallery', attraction: 'Attraction' }[t.tourism];
+    mins = t.tourism === 'museum' ? 60 : 30;
+  } else if (t.shop) {
+    if (['vacant', 'no', 'yes'].includes(t.shop) && !t.name) return null;
+    cat = FOOD_SHOPS.has(t.shop) ? 'food' : 'shop';
+    sub = titleCase(t.shop === 'yes' ? 'shop' : t.shop);
+    mins = cat === 'food' ? 15 : 20;
+  } else {
+    return null;
+  }
+  const name = t.name || (cat === 'parking' ? (t.operator ? `${t.operator} parking` : 'Parking') : null);
+  if (!name) return null;
+  const p = {
+    id: `osm-${el.type[0]}${el.id}`, name, cat, sub,
+    lat: +lat.toFixed(6), lng: +lng.toFixed(6), mins,
+  };
+  const addr = address(t);
+  if (addr) p.addr = addr;
+  if (t.opening_hours) p.oh = t.opening_hours;
+  if (t.website || t['contact:website']) p.web = t.website || t['contact:website'];
+  if (t.phone || t['contact:phone']) p.phone = t.phone || t['contact:phone'];
+  if (t.capacity && cat === 'parking') p.sub += ` · ${t.capacity} spaces`;
+  return p;
+}
+
+export function transform(json) {
+  const seen = new Set();
+  const out = [];
+  for (const el of json.elements || []) {
+    const p = toPlace(el);
+    if (!p) continue;
+    // The same business is sometimes mapped twice (a point and a building).
+    const key = `${p.cat}|${p.name.toLowerCase()}|${p.lat.toFixed(3)}|${p.lng.toFixed(3)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  out.sort((a, b) => a.cat.localeCompare(b.cat) || a.name.localeCompare(b.name));
+  return out;
+}
+
+async function main() {
+  const body = 'data=' + encodeURIComponent(overpassQuery());
+  let lastErr;
+  for (const url of MIRRORS) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST', body,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'SalemTrip/1.0 (personal trip planner)' },
+      });
+      if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+      const places = transform(await res.json());
+      if (places.length < 50) throw new Error(`${url}: only ${places.length} places, something is wrong`);
+      const counts = places.reduce((c, p) => ({ ...c, [p.cat]: (c[p.cat] || 0) + 1 }), {});
+      writeFileSync(new URL('../data/osm-places.json', import.meta.url),
+        JSON.stringify({ source: 'OpenStreetMap contributors (ODbL)', fetched: new Date().toISOString().slice(0, 10), places }) + '\n');
+      console.log(`Saved ${places.length} places from ${url}:`, counts);
+      return;
+    } catch (e) {
+      lastErr = e;
+      console.warn(String(e));
+    }
+  }
+  throw lastErr;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(e => { console.error(e); process.exit(1); });
+}
