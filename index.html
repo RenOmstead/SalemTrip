@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Salem Trip</title>
+  <meta name="description" content="Our map, parking spot and day plan for Salem, MA.">
+  <meta name="theme-color" content="#4b2a6b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Salem Trip">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="app">
+    <div id="map" aria-label="Map of Salem"></div>
+
+    <header class="topbar">
+      <div class="brand">🎃<span class="brand-name"> Salem Trip</span></div>
+      <div class="chips" id="chips"></div>
+    </header>
+
+    <div class="banners">
+      <div class="banner alert" id="alertbar" hidden></div>
+      <div class="banner" id="pickbar" hidden></div>
+      <div class="banner routebar" id="routebar" hidden></div>
+    </div>
+
+    <div class="fabs" id="fabs">
+      <button class="fab round" id="btn-locate" data-act="locate" title="Show where I am" aria-label="Show where I am">◎</button>
+      <button class="fab round" data-act="fit" title="Show the whole plan" aria-label="Show the whole plan">⤢</button>
+      <button class="fab primary" data-act="park-here" title="Save where we parked">🚗 Parked here</button>
+    </div>
+
+    <section class="sheet" id="sheet" aria-label="Trip planner">
+      <div class="sheet-handle" id="sheet-handle" role="button" aria-label="Resize panel"><span></span></div>
+      <nav class="tabs" role="tablist">
+        <button role="tab" data-tab="today"><span class="ti">🗓️</span>Plan</button>
+        <button role="tab" data-tab="places"><span class="ti">📍</span>Places</button>
+        <button role="tab" data-tab="times"><span class="ti">⏰</span>Times</button>
+        <button role="tab" data-tab="car"><span class="ti">🚗</span>Car</button>
+        <button role="tab" data-tab="more"><span class="ti">⚙️</span>Settings</button>
+      </nav>
+      <div class="panes">
+        <div class="pane" id="pane-today" role="tabpanel"></div>
+        <div class="pane" id="pane-places" role="tabpanel" hidden></div>
+        <div class="pane" id="pane-times" role="tabpanel" hidden></div>
+        <div class="pane" id="pane-car" role="tabpanel" hidden></div>
+        <div class="pane" id="pane-more" role="tabpanel" hidden></div>
+      </div>
+    </section>
+
+    <div class="toast" id="toast" hidden></div>
+    <div class="modal" id="modal" hidden></div>
+  </div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
