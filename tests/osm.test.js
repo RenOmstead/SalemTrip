@@ -36,3 +36,10 @@ test('places are tagged with the town area they are in', async () => {
   assert.equal(areaOf(42.6578, -70.6177), 'capeann'); // Dock Square, Rockport
   assert.equal(areaOf(42.36, -71.06), null); // Boston
 });
+
+test('skips car dealers and places in neighboring towns', () => {
+  assert.equal(toPlace({ type: 'node', id: 1, lat: 42.545, lon: -70.94, tags: { shop: 'car', name: 'BMW of Peabody' } }), null);
+  assert.equal(toPlace({ type: 'node', id: 2, lat: 42.525, lon: -70.925, tags: { shop: 'gift', name: 'X', 'addr:street': 'Main Street', 'addr:city': 'Peabody' } }), null);
+  assert.equal(toPlace({ type: 'node', id: 3, lat: 30, lon: -70, tags: { shop: 'gift', name: 'Far away' } }), null);
+  assert.ok(toPlace({ type: 'node', id: 4, lat: 42.522, lon: -70.894, tags: { shop: 'gift', name: 'Y', 'addr:city': 'Salem' } }));
+});

@@ -44,6 +44,12 @@ const FOOD = { restaurant: 'Restaurant', cafe: 'Cafe', fast_food: 'Fast food', b
 const FOOD_SHOPS = new Set(['bakery', 'confectionery', 'chocolate', 'coffee', 'tea', 'pastry', 'deli', 'ice_cream']);
 const MINS = { Restaurant: 60, Cafe: 25, 'Fast food': 30, Bar: 60, Pub: 60, 'Ice cream': 15, 'Beer garden': 60, 'Food court': 45 };
 
+// Shops nobody on a trip is looking for (car dealers, tire shops, storage...).
+const SKIP_SHOPS = new Set(['car', 'car_repair', 'car_parts', 'tyres', 'motorcycle', 'motorcycle_repair', 'truck',
+  'fuel', 'gas', 'energy', 'funeral_directors', 'storage_rental', 'trade', 'wholesale', 'agrarian', 'boat', 'caravan']);
+// Neighboring towns that fall inside the boxes above.
+const OTHER_TOWNS = /,\s*(Peabody|Beverly|Marblehead|Danvers|Swampscott|Lynn|Essex|Manchester[- a-z]*)$/i;
+
 const titleCase = s => s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 
 function address(t) {
@@ -75,7 +81,7 @@ export function toPlace(el) {
     sub = { museum: 'Museum', gallery: 'Gallery', attraction: 'Attraction' }[t.tourism];
     mins = t.tourism === 'museum' ? 60 : 30;
   } else if (t.shop) {
-    if (['vacant', 'no', 'yes'].includes(t.shop) && !t.name) return null;
+    if (SKIP_SHOPS.has(t.shop) || (['vacant', 'no', 'yes'].includes(t.shop) && !t.name)) return null;
     cat = FOOD_SHOPS.has(t.shop) ? 'food' : 'shop';
     sub = titleCase(t.shop === 'yes' ? 'shop' : t.shop);
     mins = cat === 'food' ? 15 : 20;
@@ -88,7 +94,9 @@ export function toPlace(el) {
     id: `osm-${el.type[0]}${el.id}`, name, cat, sub,
     lat: +lat.toFixed(6), lng: +lng.toFixed(6), mins, area: areaOf(lat, lng),
   };
+  if (!p.area) return null;
   const addr = address(t);
+  if (OTHER_TOWNS.test(addr)) return null;
   if (addr) p.addr = addr;
   if (t.opening_hours) p.oh = t.opening_hours;
   if (t.website || t['contact:website']) p.web = t.website || t['contact:website'];
