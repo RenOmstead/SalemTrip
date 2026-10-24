@@ -27,10 +27,16 @@ jobs:
     steps:
       - name: Address
         if: ${{ inputs.address != '' }}
+        # Several addresses can be separated with |
         run: |
-          q=$(jq -rn --arg q "$ADDR" '$q|@uri')
-          curl -sS -A "$UA" "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&q=$q" \
-            | jq '.[] | {display_name, lat, lon, type, house: .address.house_number}'
+          IFS='|' read -ra list <<< "$ADDR"
+          for a in "${list[@]}"; do
+            echo "== $a"
+            q=$(jq -rn --arg q "$a" '$q|@uri')
+            curl -sS -A "$UA" "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=3&addressdetails=1&q=$q" \
+              | jq -c '.[] | {display_name, lat, lon, type}'
+            sleep 1.5
+          done
       - name: Drive time
         if: ${{ inputs.from != '' && inputs.to != '' }}
         run: |
