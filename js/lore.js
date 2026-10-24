@@ -81,6 +81,12 @@ export const LORE = [
     story: 'On May 21, 1932, Arthur Oker, a quiet 57-year-old Finnish tailor and a leader of the Swedish Congregational Church, was beaten to death in his shop on Main Street. Seventeen months later, in the early hours of November 1, 1933, Augusta Johnson, a 55-year-old widow from the same church, was bludgeoned in her home in Pigeon Cove and her bed set on fire. At a church Halloween social just hours earlier she had reportedly said she would go to the police if the killer didn\u2019t confess. State Police launched the biggest manhunt in their history, searching nearly every building in town and interviewing about 2,500 households. No one was ever charged. The book Murder in Rockport, Massachusetts by Robert Fitzgibbon and Wayne Soini names a surprise suspect from the state police files, but even its two authors disagree on who did it.',
   },
   {
+    id: 'augusta-johnson-house', name: 'Augusta Johnson\u2019s house', town: 'rockport', kind: 'unsolved',
+    title: 'Halloween night, 1933',
+    addr: '1 Oakland Ave, Pigeon Cove, Rockport, MA', lat: 42.6741979, lng: -70.6318018, mins: 5,
+    story: 'Augusta Johnson, a 55-year-old widow, lived alone here. At a church Halloween social on October 31, 1933, she reportedly said she would go to the police if Arthur Oker\u2019s killer didn\u2019t confess. In the early hours of November 1 she was bludgeoned in this house and her bed set on fire. Police were sure the same hands killed both her and Oker the year before, but no one was ever charged. It\u2019s a private home today, so please look quietly from the street.',
+  },
+  {
     place: 'bearskin-neck', town: 'rockport', kind: 'legend', title: 'The bear in the tide',
     story: 'Around 1700, the story goes, Ebenezer Babson saw a bear attacking his nephew on this neck of land. He lured the bear into the water and killed it with a fishing knife, then skinned it and left the hide on the rocks to dry, which gave the place its name. A painting of the fight is on the door of the Pewter Shop.',
   },
