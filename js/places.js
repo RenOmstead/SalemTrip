@@ -7,8 +7,11 @@
 // places that are always open (statues, parks, streets). `daylight` places are
 // best before dark, so the planner treats them as closing soon after sunset.
 
+import { LORE } from './lore.js';
+
 export const CATEGORIES = {
-  witch:    { label: 'Witch trials & history', color: '#7b3fb8', icon: 'skull' },
+  lore:     { label: 'Lore & mysteries',      color: '#8f2a22', icon: 'skull' },
+  witch:    { label: 'Witch trials & history', color: '#7b3fb8', icon: 'scroll-text' },
   museum:   { label: 'Museums & sights',      color: '#b4561c', icon: 'landmark' },
   outdoors: { label: 'Waterfront & outdoors', color: '#2e7d5b', icon: 'waves' },
   food:     { label: 'Food & drink',          color: '#c23b5a', icon: 'utensils' },
@@ -217,6 +220,19 @@ export const PLACES = [
     addr: 'Eastern Point Blvd, Gloucester, MA', mins: 30, open: null, close: null, daylight: true,
     tip: 'Walk the half-mile Dog Bar Breakwater out into the harbor.' },
 ];
+
+// Lore: a story on one of the places above, or a place of its own.
+for (const l of LORE) {
+  if (l.place) {
+    const p = PLACES.find(x => x.id === l.place);
+    if (p) p.lore = l;
+    continue;
+  }
+  PLACES.push({
+    id: l.id, name: l.name, cat: 'lore', lat: l.lat, lng: l.lng, addr: l.addr, mins: l.mins || 10,
+    open: null, close: null, daylight: !!l.daylight, lore: l,
+  });
+}
 
 export const SALEM_CENTER = [42.5215, -70.8925];
 // Rough box around Salem, used for place search.
