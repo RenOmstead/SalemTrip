@@ -219,6 +219,21 @@ p { margin: 0 0 10px; }
 }
 
 /* ---------- Place card (opens in the panel when you tap a pin) ---------- */
+.whenbox { margin-top: 16px; }
+.lockmark { display: inline-flex; color: var(--brass); margin-right: 4px; vertical-align: middle; }
+.fillbtn { border-color: var(--brass-soft); color: var(--brass); }
+.gaplist { margin-top: 10px; }
+.lenchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.lenchip, .when-opt { border: 1px solid var(--line); background: none; color: var(--ink-2); font: inherit; cursor: pointer; }
+.lenchip { border-radius: 999px; padding: 7px 13px; font-weight: 650; font-size: 14px; }
+.lenchip[aria-pressed="true"], .when-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.when-opts { display: grid; gap: 7px; }
+.when-opt { border-radius: 12px; padding: 10px 12px; text-align: left; display: grid; gap: 2px; }
+.when-opt .wo-label { font-weight: 650; color: var(--ink); }
+.when-opt .wo-sub { font-size: 12.5px; color: var(--ink-3); }
+.when-opt .ok, .when-opt .no { font-size: 13px; font-weight: 650; display: inline-flex; align-items: center; gap: 4px; }
+.when-opt .ok { color: var(--good); }
+.when-opt .no { color: var(--warn, #d9a441); }
 .pc-head { display: flex; gap: 12px; align-items: flex-start; }
 .pc-head .eyebrow { margin-bottom: 2px; }
 .pc-name { font-family: var(--serif); font-weight: 600; font-size: 27px; line-height: 1.1; color: var(--ink); }
