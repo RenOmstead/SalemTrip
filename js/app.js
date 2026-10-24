@@ -136,7 +136,7 @@ let fix = null;           // latest GPS fix {lat, lng, acc, at}
 let watchId = null;
 const ui = {
   tab: 'today', cat: 'all', q: '', results: null, searching: false, route: null, pick: null,
-  sheet: 'half', alerts: [],
+  sheet: 'half', alerts: [], place: null, scrolls: {},
 };
 let notified = new Set();
 try { notified = new Set(JSON.parse(localStorage.getItem(NOTIFIED) || '[]')); } catch { /* ignore */ }
@@ -497,9 +497,9 @@ setTimeout(() => {
 // stay fast on a phone. They appear once you zoom in.
 const osmRenderer = L.canvas({ padding: 0.3, tolerance: 8 });
 const osmLayer = L.layerGroup();
-const OSM_MIN_ZOOM = { parking: 15, shop: 16, food: 16, museum: 15 };
+const OSM_MIN_ZOOM = { parking: 16, shop: 18, food: 18, museum: 16 };
 const placesLayer = L.layerGroup().addTo(map);
-const planLine = L.polyline([], { color: '#e8711a', weight: 4, opacity: .75, dashArray: '2 8', lineCap: 'round' }).addTo(map);
+const planLine = L.polyline([], { color: '#e2772c', weight: 2.5, opacity: .55, dashArray: '1 7', lineCap: 'round' }).addTo(map);
 const routeLayer = L.layerGroup().addTo(map);
 let carMarker = null, meMarker = null, meCircle = null, homeMarker = null;
 const markerById = new Map();
@@ -528,7 +528,7 @@ function renderMap() {
     const m = L.marker([p.lat, p.lng], {
       icon: pinIcon(p, it, { next: nxt && it && nxt.key === it.key, keep: planned.has(p.id) }),
       title: p.name, zIndexOffset: it ? 600 : (planned.has(p.id) ? 300 : 0), riseOnHover: true,
-    }).bindPopup(() => popupHtml(p.id), { maxWidth: 290, autoPanPaddingTopLeft: [10, 70] });
+    }).on('click', () => openPlace(p.id));
     m.addTo(placesLayer);
     markerById.set(p.id, m);
   }
@@ -537,7 +537,7 @@ function renderMap() {
     if (a.placeId || a.lat == null) continue;
     const it = plan.order.get(a.id);
     const m = L.marker([a.lat, a.lng], { icon: pinIcon({ cat: 'custom' }, it || { n: icon('clock', 14), type: 'appt', key: a.id }), zIndexOffset: 700 })
-      .bindPopup(() => apptPopupHtml(a.id), { maxWidth: 290 });
+      .on('click', () => openPlace(a.id));
     m.addTo(placesLayer);
     markerById.set(a.id, m);
   }
@@ -546,16 +546,14 @@ function renderMap() {
   planLine.setLatLngs(pts.length > 1 ? pts : []);
   declutter();
   renderOsm();
+  if (ui.place) setTimeout(() => markSelected(ui.place, placeLatLng(ui.place)));
   // Where we're staying.
   if (homeMarker) { homeMarker.remove(); homeMarker = null; }
   if (state.lodging) {
     homeMarker = L.marker([state.lodging.lat, state.lodging.lng], {
       icon: L.divIcon({ className: 'pin-wrap', html: `<div class="car-pin home-pin">${icon('house', 18)}</div>`, iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
       zIndexOffset: 850, title: state.lodging.name,
-    }).bindPopup(() => `<h4>${esc(state.lodging.name || 'Where we\u2019re staying')}</h4>
-      ${state.lodging.addr ? `<div class="small muted">${esc(state.lodging.addr)}</div>` : ''}
-      <div class="btns">${dirLink('home', 'Directions', 'btn small primary', fix && walkMinutes(fix, state.lodging, pace()) > 20 ? 'drive' : 'walk')}
-      <button class="btn small" data-act="lodging">Change</button></div>`).addTo(map);
+    }).on('click', () => openPlace('home')).addTo(map);
   }
   // The car.
   if (state.parking) {
@@ -564,7 +562,7 @@ function renderMap() {
       carMarker = L.marker(ll, {
         icon: L.divIcon({ className: 'pin-wrap', html: `<div class="car-pin">${icon('car', 18)}</div>`, iconSize: [38, 38], iconAnchor: [19, 19], popupAnchor: [0, -18] }),
         zIndexOffset: 900, draggable: true,
-      }).bindPopup(carPopupHtml).addTo(map);
+      }).on('click', () => openPlace('car')).addTo(map);
       carMarker.on('dragend', e => {
         const { lat, lng } = e.target.getLatLng();
         update(s => { s.parking = { ...s.parking, lat, lng }; });
@@ -597,66 +595,146 @@ function renderOsm() {
   for (const p of osmPlaces) {
     if (!layers[p.cat] || used.has(p.id) || z < (OSM_MIN_ZOOM[p.cat] || 16)) continue;
     L.circleMarker([p.lat, p.lng], {
-      renderer: osmRenderer, radius: z >= 17 ? 7 : 5.5, weight: 1.5, color: '#f4eadb',
-      fillColor: CATEGORIES[p.cat].color, fillOpacity: .95,
-    }).bindPopup(() => popupHtml(p.id), { maxWidth: 290, autoPanPaddingTopLeft: [10, 70] }).addTo(osmLayer);
+      renderer: osmRenderer, radius: z >= 18 ? 6 : 4.5, weight: 1, color: '#0b080f',
+      fillColor: CATEGORIES[p.cat].color, fillOpacity: .85,
+    }).on('click', () => openPlace(p.id)).addTo(osmLayer);
   }
   if (!map.hasLayer(osmLayer)) osmLayer.addTo(map);
 }
 map.on('zoomend', () => { declutter(); renderOsm(); });
 
-function popupHtml(id) {
+// ---- The place card: tap a pin and its details open in the panel.
+
+function cardHead(eyebrow, name) {
+  return `<div class="pc-head"><div class="grow"><div class="eyebrow">${eyebrow}</div><div class="pc-name">${esc(name)}</div></div>
+    <button class="iconbtn" data-act="close-place" aria-label="Close">${icon('x', 20)}</button></div>`;
+}
+const fact = (ic, html) => html ? `<div class="pc-fact">${icon(ic, 15)}<span>${html}</span></div>` : '';
+
+function placeCardHtml(id) {
+  if (id === 'car') return carCardHtml();
+  if (id === 'home') return homeCardHtml();
+  const appt = state.appts.find(a => a.id === id);
+  if (appt && !appt.placeId) return apptCardHtml(appt);
+  if (appt) id = appt.placeId;
   const p = getPlace(id);
   if (!p) return '';
   const cat = CATEGORIES[p.cat] || CATEGORIES.custom;
   const it = plan.order.get(id);
   const stop = state.stops.find(s => s.id === id);
-  const sched = it ? `<div class="small"><b>#${it.n}</b> · ${fmtTime(it.begin)}–${fmtTime(it.depart)}</div>` : '';
-  const dist = fix ? `<div class="small muted">${fmtDistance(walkMeters(fix, p))} from you · ~${walkMinutes(fix, p, pace())} min walk</div>` : '';
-  return `
-    <h4>${esc(p.name)}</h4>
-    <div class="small muted pop-cat">${icon(cat.icon, 13)} ${esc(p.sub || cat.label)}${p.addr ? ` · ${esc(p.addr.replace(/, (Salem|Rockport|Gloucester), MA$/, ''))}` : ''}</div>
-    ${p.cat !== 'parking' && p.cat !== 'transit' ? `<div class="small">${esc(hoursText(p))}${p.mins ? ` · about ${fmtDuration(p.mins)} here` : ''}</div>` : ''}
-    ${p.osm && p.oh ? `<div class="small muted">Listed hours: ${esc(p.oh)}</div>` : ''}
-    ${sched}${dist}
-    ${p.tip ? `<div class="small" style="margin-top:6px">${esc(p.tip)}</div>` : ''}
-    ${p.web || p.phone ? `<div class="small" style="margin-top:4px">${p.web ? `<a href="${esc(/^https?:/.test(p.web) ? p.web : 'https://' + p.web)}" target="_blank" rel="noopener">Website</a>` : ''}${p.web && p.phone ? ' · ' : ''}${p.phone ? `<a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a>` : ''}</div>` : ''}
-    <div class="btns">
-      ${p.cat === 'parking' ? `<button class="btn small primary" data-act="park-at" data-id="${id}">${icon('car', 14)} We parked here</button>`
-        : stop ? `<button class="btn small" data-act="toggle-stop" data-id="${id}">Remove from plan</button>
-                  <button class="btn small ${stop.priority === 'must' ? 'primary' : ''}" data-act="toggle-must" data-id="${id}">${icon('star', 14)} Must-see</button>`
-        : `<button class="btn small primary" data-act="toggle-stop" data-id="${id}">+ Add to plan</button>`}
-      ${dirLink(id)}
-      <button class="btn small" data-act="route-to" data-id="${id}">Show route</button>
-      ${p.cat !== 'parking' ? `<button class="btn small" data-act="appt-at" data-id="${id}">${icon('clock', 14)} Set a time</button>` : ''}
+  const booked = state.appts.find(a => a.placeId === id);
+  const by = fix && walkMinutes(fix, p, pace()) > 20 ? 'drive' : (it?.by || 'walk');
+  const addr = p.addr ? esc(p.addr.replace(/, (Salem|Rockport|Gloucester), MA( \d{5})?$/, '')) : '';
+  const hours = p.cat !== 'parking' && p.cat !== 'transit' ? `${esc(hoursText(p))}${p.mins ? ` · about ${fmtDuration(p.mins)} here` : ''}` : '';
+  const when = it ? `<b>Stop ${it.n}</b> · ${fmtTime(it.begin)}–${fmtTime(it.depart)}` : '';
+  const away = fix ? `${fmtDistance(walkMeters(fix, p))} away · about ${walkMinutes(fix, p, pace())} min walk` : '';
+  const links = [
+    p.web ? `<a href="${esc(/^https?:/.test(p.web) ? p.web : 'https://' + p.web)}" target="_blank" rel="noopener">Website</a>` : '',
+    p.phone ? `<a href="tel:${esc(p.phone.replace(/[^+\d]/g, ''))}">${esc(p.phone)}</a>` : '',
+  ].filter(Boolean).join(' · ');
+  let main;
+  if (p.cat === 'parking') main = `<button class="btn primary" data-act="park-at" data-id="${id}">${icon('car', 16)} We parked here</button>`;
+  else if (booked) main = `<button class="btn" data-act="tab" data-tab="times">${icon('clock', 16)} ${fmtTime(toMin(booked.time))} booking</button>`;
+  else if (stop) main = `<button class="btn on" data-act="toggle-stop" data-id="${id}">${icon('check', 16)} In the plan</button>`;
+  else main = `<button class="btn primary" data-act="toggle-stop" data-id="${id}">${icon('plus', 16)} Add to plan</button>`;
+  return `<div class="placecard">
+    ${cardHead(`${icon(cat.icon, 13)} ${esc(p.sub || cat.label)}`, p.name)}
+    <div class="pc-facts">${fact('map-pin', addr)}${fact('clock', hours)}${fact('route', when)}${fact('footprints', away)}${fact('info', p.osm && p.oh ? `Listed hours: ${esc(p.oh)}` : '')}${fact('link', links)}</div>
+    ${p.tip ? `<p class="pc-tip">${esc(p.tip)}</p>` : ''}
+    <div class="pc-actions">
+      ${dirLink(id, `${icon('navigation', 16)} Directions`, stop || booked || p.cat === 'parking' ? 'btn primary' : 'btn', by)}
+      ${main}
+    </div>
+    <div class="pc-more">
+      ${stop ? `<button class="btn small ${stop.priority === 'must' ? 'on' : ''}" data-act="toggle-must" data-id="${id}">${icon('star', 14)} Must-see</button>` : ''}
+      <button class="btn small" data-act="route-to" data-id="${id}">${icon('map', 14)} Show route</button>
+      ${p.cat !== 'parking' && !booked ? `<button class="btn small" data-act="appt-at" data-id="${id}">${icon('clock', 14)} Set a time</button>` : ''}
       ${p.cat === 'custom' && !p.osm ? `<button class="btn small danger" data-act="del-custom" data-id="${id}">Delete</button>` : ''}
-    </div>`;
+    </div></div>`;
 }
 
-function apptPopupHtml(id) {
-  const a = state.appts.find(x => x.id === id);
-  if (!a) return '';
-  return `<h4>${esc(a.title)}</h4><div class="small">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)}</div>
-    ${a.note ? `<div class="small">${esc(a.note)}</div>` : ''}
-    <div class="btns">${dirLink(id)}<button class="btn small" data-act="route-to" data-id="${id}">Show route</button>
-    <button class="btn small" data-act="tab" data-tab="times">Edit</button></div>`;
+function apptCardHtml(a) {
+  return `<div class="placecard">${cardHead(`${icon('clock', 13)} Fixed time`, a.title)}
+    <div class="pc-facts">${fact('clock', `${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)}`)}</div>
+    ${a.note ? `<p class="pc-tip">${esc(a.note)}</p>` : ''}
+    <div class="pc-actions">${dirLink(a.id, `${icon('navigation', 16)} Directions`, 'btn primary')}
+    <button class="btn" data-act="tab" data-tab="times">Edit</button></div>
+    <div class="pc-more"><button class="btn small" data-act="route-to" data-id="${a.id}">${icon('map', 14)} Show route</button></div></div>`;
 }
 
-function carPopupHtml() {
+function carCardHtml() {
   const p = state.parking;
   if (!p) return '';
-  return `<h4>Our car</h4>
-    <div class="small">Parked at ${new Date(p.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ })}${p.note ? ` · ${esc(p.note)}` : ''}</div>
-    ${p.meterUntil != null ? `<div class="small"><b>Parking runs out at ${fmtTime(p.meterUntil)}</b></div>` : ''}
-    <div class="small muted">Drag the pin if it's in the wrong spot.</div>
-    <div class="btns">${dirLink('car', 'Walk to car', 'btn small primary')}<button class="btn small" data-act="route-to" data-id="car">Show route</button>
-    <button class="btn small" data-act="tab" data-tab="car">Details</button></div>`;
+  const at = new Date(p.at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ });
+  return `<div class="placecard">${cardHead(`${icon('car', 13)} Our car`, p.note || 'Where we parked')}
+    <div class="pc-facts">${fact('clock', `Parked at ${at}`)}${p.meterUntil != null ? fact('hourglass', `<b>Parking runs out at ${fmtTime(p.meterUntil)}</b>`) : ''}
+    ${fix ? fact('footprints', `${fmtDistance(walkMeters(fix, p))} away · about ${walkMinutes(fix, p, pace())} min walk`) : ''}${fact('info', 'Drag the car pin if it’s in the wrong spot.')}</div>
+    <div class="pc-actions">${dirLink('car', `${icon('navigation', 16)} Walk to car`, 'btn primary')}
+    <button class="btn" data-act="route-to" data-id="car">${icon('map', 16)} Show route</button></div>
+    <div class="pc-more"><button class="btn small" data-act="tab" data-tab="car">Note, photo, meter</button></div></div>`;
+}
+
+function homeCardHtml() {
+  const l = state.lodging;
+  if (!l) return '';
+  return `<div class="placecard">${cardHead(`${icon('house', 13)} Where we’re staying`, l.name || 'Our rental')}
+    <div class="pc-facts">${fact('map-pin', esc(l.addr || ''))}${fix ? fact('footprints', `${fmtDistance(walkMeters(fix, l))} away`) : ''}</div>
+    <div class="pc-actions">${dirLink('home', `${icon('navigation', 16)} Directions`, 'btn primary', fix && walkMinutes(fix, l, pace()) > 20 ? 'drive' : 'walk')}
+    <button class="btn" data-act="route-to" data-id="home">${icon('map', 16)} Show route</button></div></div>`;
+}
+
+// Where a place is on the map, for anything a card can show.
+function placeLatLng(id) {
+  if (id === 'car') return state.parking && [state.parking.lat, state.parking.lng];
+  if (id === 'home') return state.lodging && [state.lodging.lat, state.lodging.lng];
+  const a = state.appts.find(x => x.id === id);
+  if (a && !a.placeId) return a.lat != null ? [a.lat, a.lng] : null;
+  const p = getPlace(a?.placeId || id);
+  return p ? [p.lat, p.lng] : null;
+}
+
+// Center a point in the part of the map the panel doesn't cover.
+function showAbove(ll, zoom = map.getZoom()) {
+  const top = 64, bottom = sheetPx();
+  const pt = map.project(ll, zoom).add([0, (bottom - top) / 2]);
+  map.flyTo(map.unproject(pt, zoom), zoom, { duration: .45 });
+}
+
+const selRing = L.circleMarker([0, 0], { radius: 21, color: '#c4a26b', weight: 2, fill: false, interactive: false });
+function openPlace(id, { zoom } = {}) {
+  const ll = placeLatLng(id);
+  if (!ll) return;
+  if (!ui.place) ui.scrolls[ui.tab] = $(`#pane-${ui.tab}`).scrollTop;
+  ui.place = id;
+  map.closePopup();
+  if (innerWidth < 900 && ui.sheet !== 'half') setSheet('half');
+  renderPane();
+  $('#pane-place').scrollTop = 0;
+  markSelected(id, ll);
+  showAbove(ll, zoom || map.getZoom());
+}
+function markSelected(id, ll) {
+  document.querySelectorAll('.pin-wrap.sel').forEach(el => el.classList.remove('sel'));
+  selRing.remove();
+  if (!id) return;
+  const a = state.appts.find(x => x.id === id);
+  const m = id === 'car' ? carMarker : id === 'home' ? homeMarker : markerById.get(a?.placeId || id);
+  if (m?.getElement()) m.getElement().classList.add('sel');
+  else selRing.setLatLng(ll).addTo(map);
+}
+function closePlace() {
+  if (!ui.place) return;
+  ui.place = null;
+  markSelected(null);
+  renderPane();
+  const el = $(`#pane-${ui.tab}`);
+  if (el) el.scrollTop = ui.scrolls[ui.tab] || 0;
 }
 
 function fitPlan() {
   const pts = plan.items.filter(i => !i.anywhere && i.lat != null).map(i => [i.lat, i.lng]);
   if (fix && pts.length && walkMeters(fix, { lat: pts[0][0], lng: pts[0][1] }) < 8000) pts.push([fix.lat, fix.lng]);
-  if (pts.length < 2) { map.setView(pts[0] || town().center, 16); return; }
+  if (pts.length < 2) { showAbove(pts[0] || town().center, 16); return; }
   map.fitBounds(pts, { paddingTopLeft: [30, 80], paddingBottomRight: [70, sheetPx() + 20], maxZoom: 17 });
 }
 
@@ -674,7 +752,7 @@ map.on('contextmenu', e => {
 });
 
 map.on('click', e => {
-  if (!ui.pick) return;
+  if (!ui.pick) { closePlace(); return; }
   const pick = ui.pick;
   endPick();
   pick.done(e.latlng);
@@ -878,12 +956,28 @@ const TOWN_ICON = { rockport: 'anchor', salem: 'moon', gloucester: 'ship' };
 
 function renderChips() {
   const { sunset } = sun();
-  const n = nowInfo();
-  const days = daysBetween(n.dateStr, state.day);
-  const where = town().name;
-  const when = isTripDay() ? `Now ${fmtTime(n.minutes)} · ${where}`
-    : `${dayLabel(state.day)} · ${where}${days > 0 ? ` · in ${days} day${days === 1 ? '' : 's'}` : ''}`;
-  $('#chips').innerHTML = `<span class="chip glass">${esc(when)}</span><span class="chip glass">${icon('sunset', 14)} ${fmtTime(sunset)}</span>`;
+  $('#chips').innerHTML = `<span class="chip glass" title="Sunset">${icon('sunset', 14)} Sunset ${fmtTime(sunset)}</span>`;
+  renderCarFab();
+}
+
+// The car button: "Parked here" when it's useful, a shortcut to the car once parked.
+function renderCarFab() {
+  const b = $('#btn-park');
+  if (state.parking) {
+    b.className = 'fab round glass car-on';
+    b.dataset.act = 'car-card';
+    b.title = 'Our car';
+    b.setAttribute('aria-label', 'Our car');
+    b.innerHTML = icon('car', 19);
+    b.hidden = false;
+  } else {
+    b.className = 'fab primary';
+    b.dataset.act = 'park-here';
+    b.title = 'Save where we parked';
+    b.removeAttribute('aria-label');
+    b.innerHTML = `${icon('car', 19)} Parked here`;
+    b.hidden = !(isTripDay() || state.settings.startFrom === 'parking');
+  }
 }
 
 function renderDayStrip() {
@@ -895,8 +989,8 @@ function renderDayStrip() {
     const t = TOWNS[day.town] || TOWNS.rockport;
     const count = day.stops.length + day.appts.length;
     return `<button class="daychip" data-act="pick-day" data-day="${d}" aria-pressed="${d === state.day}">
-      <span class="dc-date">${esc(dayLabel(d))}${d === today ? ' •' : ''}</span>
-      <span class="dc-town">${icon(TOWN_ICON[day.town] || 'map-pin', 12)} ${esc(t.name)}${travelDay(d) === 'arrive' ? ' · arrive' : travelDay(d) === 'depart' ? ' · home' : ''}${count ? ` · ${count}` : ''}</span>
+      <span class="dc-town" title="${esc(t.name)}">${icon(TOWN_ICON[day.town] || 'map-pin', 13)}</span>
+      <span class="dc-date">${esc(dayLabel(d))}</span>${d === today ? '<span class="dc-today">today</span>' : ''}${count ? `<span class="dc-n">${count}</span>` : ''}
     </button>`;
   }).join('');
   el.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
@@ -1042,7 +1136,7 @@ function renderToday() {
     }
     if (stopsCount) {
       html += `<div class="btns" style="margin:0 0 12px">
-        <button class="btn plum" data-act="replan">↻ Re-plan from here &amp; now</button>
+        <button class="btn plum" data-act="replan">${icon('refresh-cw', 15)} Re-plan from here &amp; now</button>
         ${state.replan ? '<button class="btn ghost" data-act="unreplan">Show the full day</button>' : ''}
       </div>`;
     }
@@ -1053,11 +1147,11 @@ function renderToday() {
       <p class="muted small">${fmtDate(state.day)} · ${fmtTime(toMin(s.dayStart))} to ${fmtTime(toMin(s.dayEnd))}. Sunset is at ${fmtTime(sun().sunset)}.${clockChangeNote()}</p>`;
   }
   html += travelCardHtml();
-  html += remindersHtml();
   html += daySettingsHtml();
   if (s.startFrom === 'lodging' && !state.lodging) html += lodgingPromptHtml();
 
   if (empty) {
+    html += remindersHtml();
     const sample = s.town === 'salem' || s.town === 'rockport';
     html += `<div class="empty card">
       <div class="big">Plan ${esc(dayLabel(state.day))}</div>
@@ -1123,6 +1217,7 @@ function renderToday() {
       </li>`).join('')}</ul>`;
   }
 
+  html += remindersHtml();
   html += `<div class="btns" style="margin-top:16px">
     <button class="btn" data-act="ics">${icon('calendar', 15)} Add trip to calendar</button>
     <button class="btn" data-act="share-plan">${icon('share-2', 15)} Share plan</button>
@@ -1429,16 +1524,22 @@ function layerChecks(l) {
 const PANES = { today: renderToday, places: renderPlaces, times: renderTimes, car: renderCar, more: renderMore };
 
 function renderPane() {
-  for (const k of Object.keys(PANES)) {
-    const el = $(`#pane-${k}`);
-    el.hidden = k !== ui.tab;
+  if (ui.place && !placeLatLng(ui.place)) { ui.place = null; markSelected(null); }
+  for (const k of Object.keys(PANES)) $(`#pane-${k}`).hidden = !!ui.place || k !== ui.tab;
+  const card = $('#pane-place');
+  card.hidden = !ui.place;
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
+  renderDayStrip();
+  if (ui.place) {
+    const scroll = card.scrollTop;
+    card.innerHTML = placeCardHtml(ui.place);
+    card.scrollTop = scroll;
+    return;
   }
   const el = $(`#pane-${ui.tab}`);
   const scroll = el.scrollTop;
   el.innerHTML = PANES[ui.tab]();
   el.scrollTop = scroll;
-  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
-  renderDayStrip();
 }
 
 function refresh() {
@@ -1470,23 +1571,9 @@ function closeModal() { $('#modal').hidden = true; }
 // ------------------------------------------------------------- actions ----
 
 function focusOn(id) {
-  if (id === 'car' && state.parking) {
-    if (innerWidth < 900) setSheet('peek');
-    map.flyTo([state.parking.lat, state.parking.lng], 18);
-    setTimeout(() => carMarker?.openPopup(), 400);
-    return;
-  }
-  const appt = state.appts.find(a => a.id === id);
-  const m = markerById.get(id) || (appt?.placeId && markerById.get(appt.placeId));
   const it = plan.items.find(i => i.key === id);
-  if (!m && it?.anywhere) return;
-  const p = getPlace(id);
-  const ll = m ? m.getLatLng() : it ? [it.lat, it.lng] : p ? [p.lat, p.lng] : null;
-  if (!ll) return;
-  if (innerWidth < 900) setSheet('peek');
-  map.flyTo(ll, Math.max(map.getZoom(), 17));
-  if (m) setTimeout(() => m.openPopup(), 400);
-  else if (p) setTimeout(() => L.popup({ maxWidth: 290 }).setLatLng(ll).setContent(popupHtml(id)).openOn(map), 400);
+  if (it?.anywhere && !placeLatLng(id)) return;
+  openPlace(id, { zoom: Math.max(map.getZoom(), 17) });
 }
 
 // Is a place used anywhere in the trip (any day's stops, times, start or parking)?
@@ -1720,12 +1807,20 @@ function resizePhoto(file) {
 }
 
 const ACTIONS = {
-  tab: el => { ui.tab = el.dataset.tab; if (ui.sheet === 'peek') setSheet('half'); map.closePopup(); renderPane(); },
+  tab: el => {
+    ui.tab = el.dataset.tab;
+    if (ui.place) { ui.place = null; markSelected(null); }
+    if (ui.sheet === 'peek') setSheet('half');
+    map.closePopup();
+    renderPane();
+  },
+  'close-place': () => closePlace(),
+  'car-card': () => openPlace('car', { zoom: Math.max(map.getZoom(), 17) }),
   locate: () => { if (watchId == null) { toast('Finding you…'); startWatch(true); } else if (fix) map.flyTo([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); },
   fit: () => fitPlan(),
   'park-here': () => parkHere(),
   'park-pick': () => startPick('Where did you park?', ll => { savePark({ lat: ll.lat, lng: ll.lng }); toast('Saved the parking spot.'); }),
-  'park-at': el => { const g = getPlace(el.dataset.id); map.closePopup(); savePark({ lat: g.lat, lng: g.lng, placeId: g.id }); toast(`Saved: parked at ${g.name}.`); },
+  'park-at': el => { const g = getPlace(el.dataset.id); ui.place = null; markSelected(null); savePark({ lat: g.lat, lng: g.lng, placeId: g.id }); toast(`Saved: parked at ${g.name}.`); },
   'park-pin': el => { map.closePopup(); savePark({ lat: +el.dataset.lat, lng: +el.dataset.lng }); toast('Saved the parking spot.'); },
   'clear-parking': () => {
     const prev = state.parking;
@@ -1748,7 +1843,8 @@ const ACTIONS = {
     if (osmMap.has(el.dataset.id)) update(s => adopt(s, el.dataset.id));
     const p = getPlace(el.dataset.id);
     ui.apptDraft = { title: p.name, placeId: p.id, time: '19:00', mins: p.mins || 60 };
-    map.closePopup();
+    ui.place = null;
+    markSelected(null);
     ui.tab = 'times';
     setSheet('full');
     renderPane();
@@ -1762,7 +1858,8 @@ const ACTIONS = {
   'del-break': el => update(s => { s.breaks = s.breaks.filter(b => b.id !== el.dataset.id); }),
   'del-custom': el => {
     const id = el.dataset.id;
-    map.closePopup();
+    ui.place = null;
+    markSelected(null);
     update(s => { s.custom = s.custom.filter(c => c.id !== id); s.stops = s.stops.filter(x => x.id !== id); });
   },
   'custom-here': el => {
