@@ -218,6 +218,30 @@ p { margin: 0 0 10px; }
   border: 1px solid var(--line); background: rgba(255, 255, 255, .03); color: var(--ink-2);
 }
 
+/* ---------- Lore ---------- */
+.pin.lore { background: #1a1014; border-color: var(--brass); }
+.pin.lore > span { color: #eee4d4; }
+.lore-story { margin-top: 14px; padding: 12px 14px 4px; border: 1px solid var(--brass-soft); border-radius: 12px; background: rgba(143, 42, 34, .08); }
+.lore-head { display: flex; align-items: center; gap: 8px; color: var(--brass); }
+.lore-title { font-family: var(--serif); font-size: 22px; font-weight: 600; line-height: 1.15; margin-top: 6px; color: var(--ink); }
+.lore-story p { margin: 8px 0 10px; font-size: 15px; line-height: 1.55; color: var(--ink-2); }
+.lore-kind {
+  display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap;
+  padding: 2px 8px; border-radius: 999px; border: 1px solid currentColor;
+}
+.k-unsolved { color: #e0675a; }
+.k-legend { color: var(--brass); }
+.k-ghost { color: var(--plum); }
+.k-true { color: var(--good); }
+.loretable { display: grid; border-top: 1px solid var(--line); }
+.lt-row { display: grid; grid-template-columns: 1.3fr 1fr auto 40px; gap: 8px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.lt-head { font-size: 10.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); padding: 6px 0; }
+.lt-story, .lt-where { background: none; border: 0; padding: 0; text-align: left; color: var(--ink); font: inherit; cursor: pointer; }
+.lt-story b { font-family: var(--serif); font-size: 17px; font-weight: 600; line-height: 1.2; }
+.lt-where { font-size: 13px; color: var(--ink-2); }
+.lt-row .toggle-add { min-width: 0; width: 36px; padding: 0; }
+@media (max-width: 420px) { .lt-row { grid-template-columns: 1fr auto 40px; } .lt-where { grid-column: 1; grid-row: 2; margin-top: -4px; } .lt-head span:nth-child(2) { display: none; } }
+
 /* ---------- Place card (opens in the panel when you tap a pin) ---------- */
 .whenbox { margin-top: 16px; }
 .lockmark { display: inline-flex; color: var(--brass); margin-right: 4px; vertical-align: middle; }

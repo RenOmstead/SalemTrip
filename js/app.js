@@ -5,6 +5,7 @@ import {
 import { TZ, zonedNow, zonedToDate, tzOffsetMin, sunTimes, buildICS, daysBetween, fmtDate } from './time.js';
 import { hoursOn } from './hours.js';
 import { icon } from './icons.js';
+import { LORE_KINDS } from './lore.js';
 import { TRIP_FACTS, REMINDERS, applyTripFacts, arriveAt, leaveAt, travelMins } from './trip.js';
 
 /* global L */
@@ -513,8 +514,9 @@ const markerById = new Map();
 function pinIcon(p, it, opts = {}) {
   const color = CATEGORIES[p.cat]?.color || '#666';
   const done = it && state.done.includes(it.key);
-  const cls = ['pin', it ? '' : 'small', done ? 'done' : '', opts.next ? 'next' : '', it?.type === 'appt' ? 'appt' : ''].join(' ');
-  const label = it ? (done ? icon('check', 14) : it.n) : icon(CATEGORIES[p.cat]?.icon || 'map-pin', 12);
+  const lore = !it && p.lore;
+  const cls = ['pin', it ? '' : 'small', done ? 'done' : '', opts.next ? 'next' : '', it?.type === 'appt' ? 'appt' : '', lore ? 'lore' : ''].join(' ');
+  const label = it ? (done ? icon('check', 14) : it.n) : icon(lore ? 'skull' : CATEGORIES[p.cat]?.icon || 'map-pin', lore ? 14 : 12);
   const size = it ? 30 : 22;
   return L.divIcon({
     className: it || opts.keep ? 'pin-wrap' : 'pin-wrap pin-minor',
@@ -532,7 +534,7 @@ function renderMap() {
     const it = plan.order.get(p.id);
     if (state.settings.mapFilter === 'plan' && !planned.has(p.id)) continue;
     const m = L.marker([p.lat, p.lng], {
-      icon: pinIcon(p, it, { next: nxt && it && nxt.key === it.key, keep: planned.has(p.id) }),
+      icon: pinIcon(p, it, { next: nxt && it && nxt.key === it.key, keep: planned.has(p.id) || !!p.lore }),
       title: p.name, zIndexOffset: it ? 600 : (planned.has(p.id) ? 300 : 0), riseOnHover: true,
     }).on('click', () => openPlace(p.id));
     m.addTo(placesLayer);
@@ -661,7 +663,13 @@ function placeCardHtml(id) {
       <button class="btn small" data-act="route-to" data-id="${id}">${icon('map', 14)} Show route</button>
       ${p.cat !== 'parking' && !booked ? `<button class="btn small" data-act="appt-at" data-id="${id}">${icon('clock', 14)} Set a time</button>` : ''}
       ${p.cat === 'custom' && !p.osm ? `<button class="btn small danger" data-act="del-custom" data-id="${id}">Delete</button>` : ''}
-    </div></div>`;
+    </div>
+    ${p.lore ? loreHtml(p.lore) : ''}</div>`;
+}
+
+function loreHtml(l) {
+  return `<div class="lore-story"><div class="lore-head">${icon('skull', 15)}<span class="lore-kind k-${l.kind}">${esc(LORE_KINDS[l.kind])}</span></div>
+    <div class="lore-title">${esc(l.title)}</div><p>${esc(l.story)}</p></div>`;
 }
 
 function apptCardHtml(a) {
@@ -1255,11 +1263,32 @@ function listCandidates() {
   return [...allPlaces(), ...osmPlaces.filter(p => !used.has(p.id)).map(p => getPlace(p.id))];
 }
 
+// Every story, Salem then Rockport, as a table you can tap.
+function loreTableHtml() {
+  const rows = allPlaces().filter(p => p.lore);
+  const towns = [['salem', 'Salem'], ['rockport', 'Rockport']];
+  return towns.map(([t, label]) => {
+    const list = rows.filter(p => p.lore.town === t);
+    return `<h3>${label}</h3><div class="loretable" role="table">
+      <div class="lt-row lt-head" role="row"><span role="columnheader">Story</span><span role="columnheader">Where</span><span role="columnheader">Type</span><span></span></div>
+      ${list.map(p => {
+        const st = inPlan(p.id), booked = state.appts.some(a => a.placeId === p.id);
+        return `<div class="lt-row" role="row">
+          <button class="lt-story" role="cell" data-act="focus" data-id="${p.id}"><b>${esc(p.lore.title)}</b></button>
+          <button class="lt-where" role="cell" data-act="focus" data-id="${p.id}">${esc(p.name)}</button>
+          <span role="cell"><span class="lore-kind k-${p.lore.kind}">${esc(LORE_KINDS[p.lore.kind])}</span></span>
+          <span role="cell">${booked ? '' : `<button class="btn small toggle-add ${st ? 'on' : ''}" data-act="toggle-stop" data-id="${p.id}" aria-label="${st ? 'In the plan' : 'Add to plan'}">${st ? icon('check', 14) : icon('plus', 14)}</button>`}</span>
+        </div>`;
+      }).join('')}</div>`;
+  }).join('') + `<p class="small muted" style="margin-top:10px">Tap a story to read it and see it on the map. Legends and ghost stories are local tradition, not documented history.</p>`;
+}
+
 function placesListHtml() {
+  if (ui.cat === 'lore' && !ui.q.trim()) return loreTableHtml();
   const q = ui.q.trim().toLowerCase();
   const center = townLatLng();
   const from = fix && walkMeters(fix, center) < 15000 ? fix : center;
-  let list = listCandidates().filter(p => ui.cat === 'all' ? true : ui.cat === 'plan' ? inPlan(p.id) : p.cat === ui.cat);
+  let list = listCandidates().filter(p => ui.cat === 'all' ? true : ui.cat === 'plan' ? inPlan(p.id) : ui.cat === 'lore' ? !!p.lore : p.cat === ui.cat);
   if (q) {
     list = list.filter(p => `${p.name} ${p.sub || ''} ${p.addr || ''} ${CATEGORIES[p.cat]?.label || ''}`.toLowerCase().includes(q));
   } else if (ui.cat !== 'plan') {
