@@ -75,6 +75,12 @@ export const LORE = [
     story: 'In the Great Colonial Hurricane of August 1635, the boat Watch and Wait was wrecked on the island offshore. Twenty-one people drowned, including all of Anthony Thacher’s children; only he and his wife reached the island alive. The colony gave him the island, which he called "Thacher’s Woe." Its twin lighthouses, first lit in 1771, are the only working twin lights in the country.',
   },
   {
+    id: 'oker-johnson-murders', name: 'Main Street (Arthur Oker\u2019s tailor shop)', town: 'rockport', kind: 'unsolved',
+    title: 'Who killed Arthur Oker and Augusta Johnson?',
+    addr: '77 Main St, Rockport, MA (reported)', lat: 42.6583496, lng: -70.6202703, mins: 10,
+    story: 'On May 21, 1932, Arthur Oker, a quiet 57-year-old Finnish tailor and a leader of the Swedish Congregational Church, was beaten to death in his shop on Main Street. Seventeen months later, in the early hours of November 1, 1933, Augusta Johnson, a 55-year-old widow from the same church, was bludgeoned in her home in Pigeon Cove and her bed set on fire. At a church Halloween social just hours earlier she had reportedly said she would go to the police if the killer didn\u2019t confess. State Police launched the biggest manhunt in their history, searching nearly every building in town and interviewing about 2,500 households. No one was ever charged. The book Murder in Rockport, Massachusetts by Robert Fitzgibbon and Wayne Soini names a surprise suspect from the state police files, but even its two authors disagree on who did it.',
+  },
+  {
     place: 'bearskin-neck', town: 'rockport', kind: 'legend', title: 'The bear in the tide',
     story: 'Around 1700, the story goes, Ebenezer Babson saw a bear attacking his nephew on this neck of land. He lured the bear into the water and killed it with a fishing knife, then skinned it and left the hide on the rocks to dry, which gave the place its name. A painting of the fight is on the door of the Pewter Shop.',
   },

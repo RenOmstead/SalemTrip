@@ -2,7 +2,7 @@
 // fall back to the saved copy with no signal. Map tiles: use the saved copy if
 // we have one, so places you've already looked at work offline.
 
-const APP_CACHE = 'salemtrip-app-v12';
+const APP_CACHE = 'salemtrip-app-v13';
 const TILE_CACHE = 'salemtrip-tiles-v2';
 const MAX_TILES = 1200;
 

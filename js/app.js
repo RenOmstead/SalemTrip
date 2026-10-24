@@ -201,7 +201,7 @@ const dayLabel = date => fmtDate(date).replace(',', '');
 
 function hoursText(p) {
   if (p.closedDay) return `Closed ${dayLabel(state.day)}`;
-  if (p.open == null && p.close == null) return p.hoursUnknown ? 'Hours not listed' : p.daylight ? 'Best in daylight' : 'Always open';
+  if (p.open == null && p.close == null) return p.hoursUnknown ? 'Hours not listed' : p.daylight ? 'Best in daylight' : p.cat === 'lore' ? 'View from outside, any time' : 'Always open';
   if (p.close == null) return `From ${fmtTime(toMin(p.open))}${p.daylight ? ', best in daylight' : ''}`;
   return `${fmtTime(toMin(p.open ?? '00:00'))}–${fmtTime(toMin(p.close))}`;
 }
