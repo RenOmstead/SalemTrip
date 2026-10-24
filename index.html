@@ -36,7 +36,7 @@
     <div class="fabs" id="fabs">
       <button class="fab round glass" id="btn-locate" data-act="locate" title="Show where I am" aria-label="Show where I am"><span data-icon="locate"></span></button>
       <button class="fab round glass" data-act="fit" title="Show the whole plan" aria-label="Show the whole plan"><span data-icon="maximize-2"></span></button>
-      <button class="fab primary" data-act="park-here" title="Save where we parked"><span data-icon="car"></span> Parked here</button>
+      <button class="fab primary" id="btn-park" data-act="park-here" title="Save where we parked" hidden></button>
     </div>
 
     <section class="sheet" id="sheet" aria-label="Trip planner">
@@ -55,6 +55,7 @@
         <div class="pane" id="pane-times" role="tabpanel" hidden></div>
         <div class="pane" id="pane-car" role="tabpanel" hidden></div>
         <div class="pane" id="pane-more" role="tabpanel" hidden></div>
+        <div class="pane" id="pane-place" aria-live="polite" hidden></div>
       </div>
     </section>
 

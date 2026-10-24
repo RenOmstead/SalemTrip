@@ -85,6 +85,11 @@ button { cursor: pointer; }
 .fab.round { width: 46px; padding: 0; }
 .fab.primary { background: var(--accent); color: var(--accent-ink); border-color: transparent; }
 .fab.on { color: var(--me); }
+.pin-wrap.sel { z-index: 2000 !important; }
+.pin-wrap.sel > div { filter: drop-shadow(0 0 0 var(--brass)) drop-shadow(0 0 6px rgba(196, 162, 107, .9)); }
+.pin-wrap.sel .pin { transform: rotate(-45deg) scale(1.25); }
+.fab.car-on { color: var(--brass); border-color: var(--brass-soft); }
+.fab[hidden] { display: none; }
 .sheet-full .fabs { opacity: 0; pointer-events: none; }
 
 /* ---------- Banners over the map ---------- */
@@ -206,6 +211,26 @@ p { margin: 0 0 10px; }
 .btn.block { width: 100%; }
 .btn:disabled { opacity: .45; }
 .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.btn.on { border-color: rgba(147, 196, 157, .45); color: var(--good); }
+.btn.small.on .i { fill: currentColor; }
+.iconbtn {
+  width: 38px; height: 38px; flex: none; border-radius: 50%; display: grid; place-items: center;
+  border: 1px solid var(--line); background: rgba(255, 255, 255, .03); color: var(--ink-2);
+}
+
+/* ---------- Place card (opens in the panel when you tap a pin) ---------- */
+.pc-head { display: flex; gap: 12px; align-items: flex-start; }
+.pc-head .eyebrow { margin-bottom: 2px; }
+.pc-name { font-family: var(--serif); font-weight: 600; font-size: 27px; line-height: 1.1; color: var(--ink); }
+.pc-facts { margin: 12px 0 0; display: grid; gap: 7px; font-size: 14px; color: var(--ink-2); }
+.pc-fact { display: flex; gap: 9px; align-items: flex-start; }
+.pc-fact .i { color: var(--brass); flex: none; margin-top: 2px; }
+.pc-fact b { color: var(--ink); }
+.pc-tip { margin: 12px 0 0; padding: 10px 12px; border-left: 2px solid var(--brass-soft); font-family: var(--serif); font-style: italic; font-size: 17px; line-height: 1.35; color: var(--ink-2); }
+.pc-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+.pc-actions .btn { justify-content: center; min-height: 46px; }
+.pc-more { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.pc-more:empty { display: none; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px;
@@ -306,16 +331,21 @@ details.daysettings[open] summary { border: 0; padding: 0 0 6px; }
 .searchbar { display: flex; gap: 8px; margin-bottom: 12px; }
 
 /* ---------- Trip days ---------- */
-.daystrip { display: flex; gap: 6px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid var(--line); scrollbar-width: none; flex: none; }
+.daystrip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; border-bottom: 1px solid var(--line); scrollbar-width: none; flex: none; }
 .daystrip::-webkit-scrollbar { display: none; }
 .daychip {
-  flex: none; border: 1px solid var(--line); background: none; color: var(--ink-3); border-radius: 10px;
-  padding: 6px 12px 7px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 100px; text-align: left;
+  flex: none; border: 1px solid var(--line); background: none; color: var(--ink-3); border-radius: 999px;
+  padding: 5px 12px 6px 10px; display: inline-flex; align-items: center; gap: 6px; text-align: left;
 }
 .daychip .dc-date { font-family: var(--serif); font-weight: 600; font-size: 17px; line-height: 1.1; color: var(--ink-2); }
-.daychip .dc-town { font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px; }
-.daychip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--ink-2); }
-.daychip[aria-pressed="true"] .dc-date { color: var(--accent); }
+.daychip .dc-town { display: inline-flex; color: var(--ink-3); }
+.daychip .dc-today { font-size: 10.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.daychip .dc-n {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; background: rgba(255, 255, 255, .06); color: var(--ink-2);
+}
+.daychip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.daychip[aria-pressed="true"] .dc-date, .daychip[aria-pressed="true"] .dc-town { color: var(--accent); }
 
 /* ---------- Map pins ---------- */
 .pin-wrap { background: none; border: 0; }
@@ -348,7 +378,7 @@ details.daysettings[open] summary { border: 0; padding: 0 0 6px; }
 .leaflet-container a { color: var(--plum); }
 .leaflet-container a.btn { color: var(--ink); }
 .leaflet-container a.btn.primary { color: var(--accent-ink); }
-.declutter .pin-minor { opacity: 0; pointer-events: none; }
+.declutter .pin-minor:not(.sel) { opacity: 0; pointer-events: none; }
 .leaflet-bottom.leaflet-right .leaflet-control-zoom { margin-bottom: 140px; }
 .leaflet-top { top: calc(54px + var(--safe-t)); }
 .leaflet-container .leaflet-control-attribution { background: rgba(11, 8, 15, .7); color: var(--ink-3); font-size: 10px; }
