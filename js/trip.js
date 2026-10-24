@@ -5,7 +5,7 @@
 import { toMin, toHHMM } from './planner.js';
 
 export const TRIP_FACTS = {
-  version: 3,
+  version: 4,
   start: '2026-10-30',
   end: '2026-11-03',
   salemDay: '2026-11-01',
@@ -26,7 +26,14 @@ export const TRIP_FACTS = {
   stops: {
     // Booking for the next day opens at 10 PM the night before; once booked, add the time under Times.
     '2026-11-01': [{ id: 'witch-museum', priority: 'must' }],
+    // Quick lunch between the castle tour and the whale watch.
+    '2026-10-31': [{
+      id: 'virgilios', priority: 'must', mins: 40, from: '11:45', to: '13:15',
+      when: 'Between Hammond Castle and Cape Ann Whale Watch',
+    }],
   },
+  // Taken out of the plan (Topside Bistro: swapped for Virgilio's).
+  remove: { '2026-10-31': ['osm-w213328523'] },
   appts: {
     '2026-11-01': [
       {
@@ -56,7 +63,7 @@ export const TRIP_FACTS = {
       {
         id: 'fixed-whale', title: 'Cape Ann Whale Watch', placeId: 'cape-ann-whale-watch',
         time: '13:15', mins: 255, booked: true,
-        note: 'Be there by 1:15 PM; the boat leaves at 1:30. Back around 5:30 PM. Dress warmly; it’s cold on the water.',
+        note: 'Be there by 1:15 PM; the boat leaves at 1:30. Back around 5:30 PM. Dress warmly; it’s cold on the water. From Virgilio’s, drive over (about 10 min with parking) so the car is here when you get back.',
       },
     ],
   },
@@ -105,10 +112,20 @@ export function applyTripFacts(s, ensureDays) {
     day.appts.push(...fixed.map(a => ({ ...a })));
   }
   for (const [date, settings] of Object.entries(TRIP_FACTS.days)) if (s.days[date]) Object.assign(s.days[date], settings);
+  for (const [date, ids] of Object.entries(TRIP_FACTS.remove || {})) {
+    const day = s.days[date];
+    if (!day) continue;
+    day.stops = day.stops.filter(x => !ids.includes(x.id));
+    day.appts = day.appts.filter(a => !ids.includes(a.placeId));
+  }
   for (const [date, stops] of Object.entries(TRIP_FACTS.stops)) {
     const day = s.days[date];
     if (!day) continue;
-    for (const x of stops) if (!day.stops.some(y => y.id === x.id)) day.stops.push({ ...x });
+    for (const x of stops) {
+      const i = day.stops.findIndex(y => y.id === x.id);
+      if (i < 0) day.stops.push({ ...x });
+      else if (x.when) day.stops[i] = { ...x }; // a planned slot replaces the old entry
+    }
   }
   const first = s.days[TRIP_FACTS.arrive.date], last = s.days[TRIP_FACTS.depart.date];
   if (first) Object.assign(first, { town: 'rockport', startFrom: 'lodging', dayStart: toHHMM(arriveAt()) });

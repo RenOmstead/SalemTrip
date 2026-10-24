@@ -61,3 +61,18 @@ test('reminders cover the Witch Museum booking and cancellation checks', async (
   assert.equal(`${book.date} ${book.time}`, '2026-10-31 22:00');
   assert.ok(REMINDERS.filter(r => /cancellations/.test(r.title)).length >= 4);
 });
+
+test('Oct 31: Topside comes out, Virgilio\u2019s goes in between the castle and the whale watch', () => {
+  const s = { trip: { start: '2026-10-30', end: '2026-11-03' }, days: {}, factsV: 3 };
+  const ensure = st => { for (const d of ['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03']) st.days[d] ??= { appts: [], stops: [], breaks: [], done: [] }; };
+  ensure(s);
+  s.days['2026-10-31'].appts.push({ id: 'a-top', title: 'Topside Bistro', placeId: 'osm-w213328523', time: '12:40', mins: 30 });
+  s.days['2026-10-31'].stops.push({ id: 'osm-w213328523', priority: 'nice' });
+  applyTripFacts(s, ensure);
+  const d = s.days['2026-10-31'];
+  assert.ok(!d.appts.some(a => a.placeId === 'osm-w213328523'));
+  assert.ok(!d.stops.some(x => x.id === 'osm-w213328523'));
+  const v = d.stops.find(x => x.id === 'virgilios');
+  assert.equal(v.from, '11:45');
+  assert.equal(v.to, '13:15');
+});

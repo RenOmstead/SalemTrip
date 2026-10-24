@@ -198,6 +198,9 @@ export const PLACES = [
     tip: 'Saltwater taffy made on site since 1929.' },
 
   // ---------------- Gloucester ----------------
+  { id: 'virgilios', name: 'Virgilio\u2019s Italian Bakery', cat: 'food', lat: 42.6117376, lng: -70.6654827,
+    addr: '29 Main St, Gloucester, MA', mins: 40, open: '08:30', close: '17:00', oh: 'Mo-Sa 08:30-17:00; Su off', phone: '978-283-5295',
+    tip: 'Gloucester\u2019s Italian bakery and deli, famous for its subs (try the St. Joseph). Counter service, so it\u2019s quick.' },
   { id: 'cape-ann-whale-watch', name: 'Cape Ann Whale Watch', cat: 'tour', lat: 42.61570, lng: -70.65220,
     addr: "415 Main St (Rose's Wharf), Gloucester, MA", mins: 240, open: null, close: null, tickets: true,
     tip: 'About 4 hours out to Stellwagen Bank. Check in 30 minutes before your boat, and dress warmly.' },
