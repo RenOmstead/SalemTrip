@@ -190,6 +190,8 @@ function getPlace(id) {
 // Hand-picked places plus our own. OpenStreetMap places are drawn separately.
 const allPlaces = () => [...PLACES, ...state.custom].map(p => getPlace(p.id));
 const inPlan = id => state.stops.some(s => s.id === id);
+// Reservations built into the trip (js/trip.js) are locked: they can't be moved or deleted here.
+const isLocked = a => String(a?.id || '').startsWith('fixed-');
 const nowInfo = () => zonedNow();
 const isTripDay = () => state.settings.practice || nowInfo().dateStr === state.tripDate;
 const sun = () => sunTimes(state.tripDate, town().center[0], town().center[1]);
@@ -281,14 +283,18 @@ function computePlan() {
   const skip = key => live && done.has(key);
 
   const stops = [];
+  const booked = new Set(state.appts.map(a => a.placeId).filter(Boolean));
   for (const x of state.stops) {
     const p = getPlace(x.id);
-    if (!p || skip(p.id)) continue;
-    let close = toMin(p.close);
+    if (!p || skip(p.id) || booked.has(p.id)) continue;
+    let open = toMin(p.open), close = toMin(p.close);
     if (p.daylight) close = Math.min(close ?? 1440, sunset + 20);
+    // "Between the castle and the whale watch" narrows when it can happen.
+    if (x.from) open = Math.max(open ?? 0, toMin(x.from));
+    if (x.to) close = Math.min(close ?? 1440, toMin(x.to));
     stops.push({
-      key: p.id, name: p.name, lat: p.lat, lng: p.lng, mins: Number(p.mins) || 0,
-      open: toMin(p.open), close, priority: x.priority || 'nice', closed: !!p.closedDay,
+      key: p.id, name: p.name, lat: p.lat, lng: p.lng, mins: Number(x.mins ?? p.mins) || 0,
+      open, close, priority: x.priority || 'nice', closed: !!p.closedDay,
     });
   }
   for (const b of state.breaks) {
@@ -637,6 +643,9 @@ function placeCardHtml(id) {
   else if (booked) main = `<button class="btn" data-act="tab" data-tab="times">${icon('clock', 16)} ${fmtTime(toMin(booked.time))} booking</button>`;
   else if (stop) main = `<button class="btn on" data-act="toggle-stop" data-id="${id}">${icon('check', 16)} In the plan</button>`;
   else main = `<button class="btn primary" data-act="toggle-stop" data-id="${id}">${icon('plus', 16)} Add to plan</button>`;
+  if (ui.adding?.id === id) {
+    return `<div class="placecard">${cardHead(`${icon(cat.icon, 13)} ${esc(p.sub || cat.label)}`, p.name)}${whenHtml(id)}</div>`;
+  }
   return `<div class="placecard">
     ${cardHead(`${icon(cat.icon, 13)} ${esc(p.sub || cat.label)}`, p.name)}
     <div class="pc-facts">${fact('map-pin', addr)}${fact('clock', hours)}${fact('route', when)}${fact('footprints', away)}${fact('info', p.osm && p.oh ? `Listed hours: ${esc(p.oh)}` : '')}${fact('link', links)}</div>
@@ -646,7 +655,9 @@ function placeCardHtml(id) {
       ${main}
     </div>
     <div class="pc-more">
+      ${stop ? `<button class="btn small" data-act="change-when" data-id="${id}">${icon('clock', 14)} ${esc(stop.when || 'Any time')} · ${fmtDuration(Number(stop.mins ?? p.mins) || 0)}</button>` : ''}
       ${stop ? `<button class="btn small ${stop.priority === 'must' ? 'on' : ''}" data-act="toggle-must" data-id="${id}">${icon('star', 14)} Must-see</button>` : ''}
+      ${booked && !String(booked.id).startsWith('fixed-') ? `<button class="btn small danger" data-act="del-appt" data-id="${booked.id}">Remove the fixed time</button>` : ''}
       <button class="btn small" data-act="route-to" data-id="${id}">${icon('map', 14)} Show route</button>
       ${p.cat !== 'parking' && !booked ? `<button class="btn small" data-act="appt-at" data-id="${id}">${icon('clock', 14)} Set a time</button>` : ''}
       ${p.cat === 'custom' && !p.osm ? `<button class="btn small danger" data-act="del-custom" data-id="${id}">Delete</button>` : ''}
@@ -725,6 +736,7 @@ function markSelected(id, ll) {
 function closePlace() {
   if (!ui.place) return;
   ui.place = null;
+  ui.adding = null;
   markSelected(null);
   renderPane();
   const el = $(`#pane-${ui.tab}`);
@@ -1008,8 +1020,8 @@ function tl(item, opts = {}) {
   const p = getPlace(item.key);
   const sub = [];
   const appt = item.type === 'appt' ? state.appts.find(a => a.id === item.key) : null;
-  if (item.type === 'appt') sub.push(apptPill(appt));
-  else if (item.priority === 'must' && !item.anywhere) sub.push(`<span class="pill must">${icon('star', 11)} Must-see</span>`);
+  if (item.type === 'appt') sub.push(`${isLocked(appt) ? `<span class="lockmark" title="Locked in">${icon('lock', 13)}</span>` : ''}${apptPill(appt)}`);
+  else if (item.priority === 'must' && !item.anywhere && !state.stops.find(x => x.id === item.key)?.when) sub.push(`<span class="pill must">${icon('star', 11)} Must-see</span>`);
   if (done) sub.push('<span class="pill done">Done</span>');
   sub.push(`<span>${fmtDuration(item.depart - item.begin)}</span>`);
   if (p?.tickets) sub.push(`<span>${icon('ticket', 12)} book ahead</span>`);
@@ -1035,7 +1047,9 @@ function backKey() { return plan.base.car ? 'car' : plan.base.home && state.lodg
 
 function leg(item) {
   if (item.anywhere) return '';
+  const gap = item.type === 'appt' && item.wait >= 20 ? whenOptions().find(o => o.to === toHHMM(item.begin)) : null;
   const free = item.wait >= 15 ? `<span class="tl-free">${fmtDuration(item.wait)} free${item.type === 'appt' ? ' before this' : ''}</span>` : '';
+  const fill = gap ? `<button class="btn small fillbtn" data-act="fill-gap" data-key="${gap.key}">${icon('wand', 14)} Fill this gap</button>` : '';
   const how = item.by === 'drive' ? `${icon('car', 14)} ${item.walk} min drive` : `${icon('footprints', 14)} ${item.walk} min`;
   const walk = item.walk > 0 ? `${how} · ${fmtDistance(item.dist)}` : `${icon('footprints', 14)} Right here`;
   const key = item.type === 'end' ? backKey() : item.key;
@@ -1043,7 +1057,7 @@ function leg(item) {
     <li class="tl-leg">
       <div class="tl-time small muted">${item.type === 'appt' && item.walk > 0 ? `leave ${nbTime(item.leaveBy)}` : ''}</div>
       <div class="line"></div>
-      <div class="walk">${walk} ${item.walk > 0 ? dirLink(key, 'Go', 'btn small', item.by) : ''} ${free}</div>
+      <div class="walk">${walk} ${item.walk > 0 ? dirLink(key, 'Go', 'btn small', item.by) : ''} ${free} ${fill}</div>
     </li>`;
 }
 
@@ -1352,7 +1366,7 @@ function renderTimes() {
           <div class="li-title">${esc(a.title)} ${a.booked || a.status ? apptPill(a) : ''}</div>
           <div class="li-sub">${fmtTime(toMin(a.time))} · ${fmtDuration(+a.mins || 0)} · ${esc(p ? p.name : 'Pin on map')}</div>
         </button>
-        <button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">${icon('x', 15)}</button>
+        ${isLocked(a) ? `<span class="lockmark" title="Locked in">${icon('lock', 15)}</span>` : `<button class="btn small ghost" data-act="del-appt" data-id="${a.id}" aria-label="Delete">${icon('x', 15)}</button>`}
         ${it?.warnings.length ? `<div style="flex-basis:100%;padding-left:44px">${it.warnings.map(w => `<div class="warnline">${icon('triangle-alert', 13)} ${esc(w)}</div>`).join('')}</div>` : ''}
         ${it && it.walk ? `<div style="flex-basis:100%;padding-left:44px" class="small muted">Leave by ${fmtTime(it.leaveBy)} · ${it.walk} min ${it.by === 'drive' ? 'drive' : 'walk'} from the stop before</div>` : ''}
         ${a.note ? `<div style="flex-basis:100%;padding-left:44px" class="small">${esc(a.note)}</div>` : ''}
@@ -1525,9 +1539,14 @@ const PANES = { today: renderToday, places: renderPlaces, times: renderTimes, ca
 
 function renderPane() {
   if (ui.place && !placeLatLng(ui.place)) { ui.place = null; markSelected(null); }
-  for (const k of Object.keys(PANES)) $(`#pane-${k}`).hidden = !!ui.place || k !== ui.tab;
+  const overlay = ui.place || ui.gap;
+  for (const k of Object.keys(PANES)) $(`#pane-${k}`).hidden = !!overlay || k !== ui.tab;
   const card = $('#pane-place');
-  card.hidden = !ui.place;
+  card.hidden = !overlay;
+  if (!ui.place && ui.gap) {
+    card.innerHTML = gapHtml();
+    return;
+  }
   document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.tab === ui.tab)));
   renderDayStrip();
   if (ui.place) {
@@ -1603,8 +1622,145 @@ function savePark({ lat, lng, placeId = null }) {
   map.flyTo([lat, lng], 17);
 }
 
+// The gaps between the day's fixed times, for "when should we go?".
+function whenOptions() {
+  const appts = state.appts.filter(a => a.time).map(a => ({ ...a, start: toMin(a.time), end: toMin(a.time) + (Number(a.mins) || 0) }))
+    .sort((a, b) => a.start - b.start);
+  const short = t => t.replace(/ guided tour$/i, '').replace(/^(Breakfast|Lunch|Dinner) at /, '');
+  const opts = [{ key: 'best', label: 'Whenever it fits best' }];
+  appts.forEach((a, i) => {
+    const prev = appts[i - 1];
+    opts.push(prev
+      ? { key: `gap${i}`, label: `Between ${short(prev.title)} and ${short(a.title)}`, from: toHHMM(prev.end), to: toHHMM(a.start) }
+      : { key: `gap${i}`, label: `Before ${short(a.title)}`, to: toHHMM(a.start) });
+  });
+  if (appts.length) {
+    const last = appts[appts.length - 1];
+    opts.push({ key: 'after', label: `After ${short(last.title)}`, from: toHHMM(last.end) });
+  }
+  return opts.filter(o => o.key === 'best' || !o.from || !o.to || toMin(o.to) > toMin(o.from));
+}
+
+// Try a stop with given settings and see where the planner puts it.
+function tryStop(entry) {
+  const keep = state.stops;
+  state.stops = [...keep.filter(x => x.id !== entry.id), entry];
+  lastPlanKey = '';
+  computePlan();
+  const it = plan.order.get(entry.id);
+  const out = it && it.type === 'stop' ? { begin: it.begin, depart: it.depart, late: it.warnings.length > 0 } : null;
+  state.stops = keep;
+  lastPlanKey = '';
+  computePlan();
+  return out;
+}
+
+function stopEntry(id, opt, mins) {
+  const o = whenOptions().find(x => x.key === opt) || { key: 'best' };
+  const old = state.stops.find(x => x.id === id);
+  const e = { id, priority: o.key === 'best' ? (old?.priority || 'nice') : 'must', mins };
+  if (o.from) e.from = o.from;
+  if (o.to) e.to = o.to;
+  if (o.key !== 'best') e.when = o.label;
+  return e;
+}
+
+function whenHtml(id) {
+  const a = ui.adding, p = getPlace(id);
+  const lengths = [...new Set([30, 45, 60, 90, 120, Number(p.mins) || 60])].sort((x, y) => x - y);
+  const opts = whenOptions().map(o => {
+    const r = tryStop(stopEntry(id, o.key, a.mins));
+    const res = r ? `<span class="ok">${icon('check', 13)} ${fmtTime(r.begin)}–${fmtTime(r.depart)}</span>`
+      : `<span class="no">Too tight for ${fmtDuration(a.mins)}</span>`;
+    const span = o.from && o.to ? `${fmtTime(toMin(o.from))}–${fmtTime(toMin(o.to))}` : o.to ? `until ${fmtTime(toMin(o.to))}` : o.from ? `from ${fmtTime(toMin(o.from))}` : 'The planner picks the time';
+    return `<button class="when-opt" data-act="pick-when" data-key="${o.key}" aria-pressed="${a.opt === o.key}">
+      <span class="wo-label">${esc(o.label)}</span><span class="wo-sub">${span}</span>${res}</button>`;
+  }).join('');
+  const chips = lengths.map(m => `<button class="lenchip" data-act="pick-mins" data-mins="${m}" aria-pressed="${a.mins === m}">${fmtDuration(m)}</button>`).join('');
+  const editing = inPlan(id);
+  return `<div class="whenbox">
+    <div class="eyebrow">How long?</div><div class="lenchips">${chips}</div>
+    <div class="eyebrow" style="margin-top:14px">When?</div><div class="when-opts">${opts}</div>
+    <div class="pc-actions"><button class="btn primary" data-act="confirm-add" data-id="${id}">${icon('check', 16)} ${editing ? 'Save' : 'Add to plan'}</button>
+    <button class="btn" data-act="cancel-add">Cancel</button></div></div>`;
+}
+
+// ---- The gap assistant: what fits between two reservations, close by.
+const MEALS = [[11 * 60, 14 * 60], [17 * 60, 20 * 60 + 30]];
+function gapHtml() {
+  const g = whenOptions().find(o => o.key === ui.gap.key);
+  if (!g) { ui.gap = null; return ''; }
+  const from = g.from ? toMin(g.from) : null, to = g.to ? toMin(g.to) : null;
+  // Where we'll be: next to the reservation after the gap (or before it).
+  const appts = state.appts.filter(a => a.time);
+  const near = appts.find(a => a.time === g.to) || appts.find(a => toHHMM(toMin(a.time) + (+a.mins || 0)) === g.from);
+  const anchor = placeLatLng(near?.id) || town().center;
+  const at = { lat: anchor[0], lng: anchor[1] };
+  const rank = x => x.d + (inPlan(x.p.id) ? -5000 : 0) +
+    (kind === 'food' && /bar|pub|fast food|ice cream|coffee|cafe|donut|nutrition/i.test(x.p.sub || '') ? 700 : 0);
+  const mealTime = MEALS.some(([a, b]) => (from ?? 0) < b && (to ?? 1440) > a);
+  const kind = ui.gap.kind || (mealTime ? 'food' : 'sights');
+  const inGap = id => state.stops.some(x => x.id === id && x.from === g.from && x.to === g.to);
+  const ok = p => !inGap(p.id) && !state.appts.some(a => a.placeId === p.id) && p.cat !== 'parking' && p.cat !== 'transit' &&
+    (kind === 'food' ? p.cat === 'food' : kind === 'shops' ? p.cat === 'shop' : !['food', 'shop'].includes(p.cat));
+  const seen = new Set();
+  const pool = [...allPlaces(), ...osmPlaces.map(o => getPlace(o.id))].filter(p => p && !seen.has(p.id) && seen.add(p.id) && ok(p))
+    .map(p => ({ p, d: haversine(at, p) })).filter(x => x.d < 4000)
+    // For a meal, sit-down restaurants first; ours (in the plan already) first of all.
+    .sort((a, b) => rank(a) - rank(b)).slice(0, 18);
+  const len = p => Math.min(Number(p.mins) || (p.cat === 'food' ? 45 : 30), kind === 'food' ? 45 : 90);
+  const fits = [];
+  for (const { p, d } of pool) {
+    const mins = Number(state.stops.find(x => x.id === p.id)?.mins) || len(p);
+    const r = tryStop({ id: p.id, priority: 'must', mins, from: g.from, to: g.to });
+    if (r && !r.late) fits.push({ p, d, mins, r });
+    if (fits.length >= 8) break;
+  }
+  const tabs = [['food', 'utensils', 'Food'], ['sights', 'landmark', 'Sights'], ['shops', 'shopping-bag', 'Shops']]
+    .map(([k, ic, l]) => `<button class="lenchip" data-act="gap-kind" data-kind="${k}" aria-pressed="${kind === k}">${icon(ic, 14)} ${l}</button>`).join('');
+  const span = from != null && to != null ? `${fmtTime(from)}–${fmtTime(to)}` : to != null ? `until ${fmtTime(to)}` : `from ${fmtTime(from)}`;
+  return `<div class="placecard">${cardHead(`${icon('wand', 13)} Fill this gap`, g.label)}
+    <p class="small muted" style="margin:6px 0 12px">${span}. Your reservations stay put; these fit around them${near ? `, close to ${esc(near.title)}` : ''}.</p>
+    <div class="lenchips">${tabs}</div>
+    ${fits.length ? `<ul class="list gaplist">${fits.map(({ p, d, mins, r }) => `<li>
+      <button class="li-main" data-act="focus" data-id="${esc(p.id)}"><div class="li-title">${esc(p.name)}</div>
+      <div class="li-sub">${fmtTime(r.begin)}–${fmtTime(r.depart)} · ${fmtDistance(d)} away${p.sub ? ` · ${esc(p.sub)}` : ''}</div></button>
+      <button class="btn small primary" data-act="gap-add" data-id="${esc(p.id)}" data-mins="${mins}">${inPlan(p.id) ? 'Move here' : `${icon('plus', 14)} Add`}</button></li>`).join('')}</ul>`
+      : `<p class="small muted" style="margin-top:14px">Nothing nearby fits in this gap${kind === 'food' ? '. Try a shorter stop, or eat after' : ''}.</p>`}
+    <p class="small muted" style="margin-top:10px">Want somewhere else? Tap any pin on the map or find it in Places, then Add to plan and pick this gap.</p></div>`;
+}
+
+function startAdd(id) {
+  const p = getPlace(id);
+  const x = state.stops.find(y => y.id === id);
+  const opt = x?.when ? (whenOptions().find(o => o.label === x.when)?.key || 'best') : 'best';
+  ui.adding = { id, opt, mins: Number(x?.mins ?? p.mins) || 60 };
+  if (innerWidth < 900) setSheet('full');
+  renderPane();
+}
+
+function confirmAdd(id) {
+  const a = ui.adding;
+  ui.adding = null;
+  const had = inPlan(id);
+  update(s => {
+    adopt(s, id);
+    const e = stopEntry(id, a.opt, a.mins);
+    const i = s.stops.findIndex(x => x.id === id);
+    if (i >= 0) s.stops[i] = e; else s.stops.push(e);
+  });
+  const it = plan.order.get(id), p = getPlace(id);
+  toast(it ? `${had ? 'Moved' : 'Added'} ${p.name}: ${fmtTime(it.begin)}–${fmtTime(it.depart)}` : `${p.name} doesn't fit there. It's under Didn't fit.`);
+}
+
 function toggleStop(id) {
   const had = inPlan(id);
+  // With fixed times that day, ask when and how long first.
+  if (!had && state.appts.some(a => a.time)) {
+    if (ui.place !== id) openPlace(id, { zoom: Math.max(map.getZoom(), 16) });
+    startAdd(id);
+    return;
+  }
   update(s => {
     if (had) {
       s.stops = s.stops.filter(x => x.id !== id);
@@ -1810,11 +1966,32 @@ const ACTIONS = {
   tab: el => {
     ui.tab = el.dataset.tab;
     if (ui.place) { ui.place = null; markSelected(null); }
+    ui.gap = null;
+    ui.adding = null;
     if (ui.sheet === 'peek') setSheet('half');
     map.closePopup();
     renderPane();
   },
-  'close-place': () => closePlace(),
+  'close-place': () => { ui.adding = null; if (ui.gap && !ui.place) { ui.gap = null; renderPane(); return; } closePlace(); },
+  'pick-when': el => { ui.adding.opt = el.dataset.key; renderPane(); },
+  'pick-mins': el => { ui.adding.mins = +el.dataset.mins; renderPane(); },
+  'confirm-add': el => confirmAdd(el.dataset.id),
+  'cancel-add': () => { ui.adding = null; renderPane(); },
+  'change-when': el => startAdd(el.dataset.id),
+  'fill-gap': el => {
+    ui.place = null; markSelected(null);
+    ui.gap = { key: el.dataset.key };
+    if (innerWidth < 900 && ui.sheet !== 'full') setSheet('full');
+    renderPane();
+    $('#pane-place').scrollTop = 0;
+  },
+  'gap-kind': el => { ui.gap.kind = el.dataset.kind; renderPane(); },
+  'gap-add': el => {
+    const id = el.dataset.id, key = ui.gap.key;
+    ui.gap = null;
+    ui.adding = { id, opt: key, mins: +el.dataset.mins };
+    confirmAdd(id);
+  },
   'car-card': () => openPlace('car', { zoom: Math.max(map.getZoom(), 17) }),
   locate: () => { if (watchId == null) { toast('Finding you…'); startWatch(true); } else if (fix) map.flyTo([fix.lat, fix.lng], Math.max(map.getZoom(), 17)); },
   fit: () => fitPlan(),
@@ -1851,6 +2028,7 @@ const ACTIONS = {
     $('#pane-times form[data-form="appt"] input[name="time"]')?.focus();
   },
   'del-appt': el => {
+    if (isLocked(state.appts.find(a => a.id === el.dataset.id))) return;
     const prev = state.appts.find(a => a.id === el.dataset.id);
     update(s => { s.appts = s.appts.filter(a => a.id !== el.dataset.id); });
     toast('Removed.', { label: 'Undo', run: () => update(s => { s.appts.push(prev); }) });
@@ -2045,6 +2223,7 @@ document.addEventListener('submit', e => {
     if (!placeId && lat == null) { toast('Pick where it is first.'); return; }
     update(s => {
       s.appts.push({ id: uid('a-'), title: d.title.trim(), placeId, lat, lng, time: d.time, mins: Math.max(0, Number(d.mins) || 0), note: d.note.trim() });
+      if (placeId) s.stops = s.stops.filter(x => x.id !== placeId);
     });
     ui.apptDraft = null;
     renderPane();

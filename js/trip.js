@@ -5,7 +5,7 @@
 import { toMin, toHHMM } from './planner.js';
 
 export const TRIP_FACTS = {
-  version: 2,
+  version: 3,
   start: '2026-10-30',
   end: '2026-11-03',
   salemDay: '2026-11-01',
@@ -55,8 +55,8 @@ export const TRIP_FACTS = {
       },
       {
         id: 'fixed-whale', title: 'Cape Ann Whale Watch', placeId: 'cape-ann-whale-watch',
-        time: '13:00', mins: 270, booked: true,
-        note: 'Boat leaves at 1:30 PM. Check in by 1:00 PM. Back around 5:30 PM. Dress warmly; it’s cold on the water.',
+        time: '13:15', mins: 255, booked: true,
+        note: 'Be there by 1:15 PM; the boat leaves at 1:30. Back around 5:30 PM. Dress warmly; it’s cold on the water.',
       },
     ],
   },

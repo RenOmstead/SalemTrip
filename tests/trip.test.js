@@ -26,7 +26,7 @@ test('the fixed parts are filled into a saved plan once', () => {
   const oct31 = s.days['2026-10-31'].appts;
   assert.deepEqual(oct31.map(a => a.id).sort(), ['a2', 'fixed-hammond', 'fixed-whale'], 'hand-added copy replaced, others kept');
   assert.equal(oct31.find(a => a.id === 'fixed-hammond').time, '10:30');
-  assert.equal(oct31.find(a => a.id === 'fixed-whale').time, '13:00'); // check in half an hour before the 1:30 boat
+  assert.equal(oct31.find(a => a.id === 'fixed-whale').time, '13:15'); // be there 15 min before the 1:30 boat
   assert.equal(s.days['2026-10-30'].dayStart, '16:30');
   assert.equal(s.days['2026-11-03'].dayEnd, '10:30');
   // Running it again changes nothing (so edits made later are kept).
